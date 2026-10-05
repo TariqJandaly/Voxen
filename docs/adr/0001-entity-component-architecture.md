@@ -36,7 +36,7 @@ Use **entity-component composition**. `GameObject` is the entity, `Component` ho
 **Mitigations**
 
 - Object pooling plus indexed `for` loops in the update path keep per-frame GC pressure and loop overhead low at the target scale.
-- If the scale target grows, the rendering backend abstraction (Phase 7) is the intended seam for a future data-oriented path.
+- If the scale target grows, the rendering backend abstraction is the intended seam for a future data-oriented path.
 
 ## Naming
 

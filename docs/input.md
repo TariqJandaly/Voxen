@@ -149,7 +149,7 @@ export class PlayerController extends Component {
 
 ## Limitations
 
-- Keyboard only. Mouse and pointer tracking, along with screen-to-world translation, are planned for Phase 3.
+- Keyboard only. Mouse and pointer tracking, along with screen-to-world translation, are not built yet.
 - No runtime rebinding UI. `setBindings` exists, but the editor does not expose it yet.
 - No gamepad support.
 - Input is focus-scoped. The canvas has to be focused, and there is no global fallback listener by design.

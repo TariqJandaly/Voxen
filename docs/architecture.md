@@ -77,7 +77,7 @@ Because pooled objects get recycled, `start()` must not run again on reuse. `Gam
 
 Components get `this.gameObject` and `this.scene` injected when you add them with `GameObject.addComponent()`. Assigning `gameObject.scene` propagates the scene reference to every attached component, including ones added later.
 
-There is no separate `render()` hook right now. Rendering components draw inside `update()`. If a dedicated render pass arrives with the WebGPU backend (Phase 7), that is where it would go. For now, keep drawing at the end of `update()`.
+There is no separate `render()` hook right now. Rendering components draw inside `update()`. If a dedicated render pass arrives with a future WebGPU backend, that is where it would go. For now, keep drawing at the end of `update()`.
 
 ## Rendering
 
