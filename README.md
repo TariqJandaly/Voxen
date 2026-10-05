@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./public/logo.svg" width="96" height="96" alt="Voxen logo" />
+
 # Voxen Engine
 
 **A small 2D game engine: a pure TypeScript Canvas core with a React editor on top.**
@@ -105,9 +107,18 @@ node .output/server/index.mjs
 
 It listens on `PORT`, which defaults to `3000`. Deploy the `.output/` directory to any Node-compatible host, or look at the [Nitro deploy presets](https://v3.nitro.build/deploy). `.output/` is git-ignored.
 
+### Site metadata
+
+Favicons, the web manifest, and the 1200x630 social card live in `public/`. Page metadata is defined in `src/seo.ts` and applied in `src/routes/__root.tsx`.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VITE_SITE_URL` | `http://localhost:3000` | Public origin used for canonical and Open Graph URLs. Set it for production, for example `VITE_SITE_URL=https://voxen.example bun run build`. |
+
 ## Project layout
 
 ```text
+public/                     Favicons, web manifest, and the social card
 src/
   core/                     The engine. No React in here.
     Component.ts            Base class and lifecycle hooks
@@ -122,10 +133,11 @@ src/
     components/
       GameViewport.tsx      Mounts the canvas and boots the engine
   routes/
-    __root.tsx              Document shell
+    __root.tsx              Document shell and page metadata
     index.tsx               Home route
   router.tsx
   routeTree.gen.ts          Generated. Do not edit.
+  seo.ts                    Site title, description, and social URLs
   styles.css
 ```
 
