@@ -1,14 +1,14 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { Viewport } from '../components/Viewport'
+import { createFileRoute } from "@tanstack/react-router";
+import { GameViewport } from "../editor/components/GameViewport";
 
-export const Route = createFileRoute('/')({
-  component: Home,
-})
+export const Route = createFileRoute("/")({
+	component: Home,
+});
 
 function Home() {
-  return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-8">
-      <Viewport />
-    </div>
-  )
+	return (
+		<div className="h-screen w-screen overflow-hidden">
+			<GameViewport />
+		</div>
+	);
 }
