@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="128" height="128" role="img" aria-label="Voxen">
+  <title>Voxen</title>
+  <path fill="#FF7A45" d="M32 8 L54 20 L32 32 L10 20 Z" />
+  <path fill="#D63A00" d="M10 20 L32 32 L32 56 L10 44 Z" />
+  <path fill="#FF4500" d="M54 20 L32 32 L32 56 L54 44 Z" />
+</svg>
