@@ -30,6 +30,14 @@ If the change is bigger than a small fix, open an issue first. It is easier to a
 
 This boundary is the whole point of the project. If a core file seems to need React, the logic probably belongs in the editor instead.
 
+### Editor state lives in the scene
+
+The editor owns one `Scene` through `EditorProvider` and renders its panels from it. Keep game state on the engine side:
+
+- Read objects from `scene.allObjects` and mutate them directly.
+- Call `scene.onHierarchyChanged()` after a structural change so the panels re-render. Do not copy objects into React state.
+- Consume the shared scene with `useEditor()`; do not create a second `Scene`.
+
 ### Formatting and style
 
 Formatting, linting, and import order are handled by [Biome](./biome.json). Do not format by hand, just run the fixer. Indentation is tabs and quotes are double.

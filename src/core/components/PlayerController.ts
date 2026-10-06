@@ -1,6 +1,6 @@
 import { Component } from "../Component";
 
-/** Moves the host GameObject with the directional input actions. */
+/** Moves its object with the `left`, `right`, `up`, and `down` input actions. */
 export class PlayerController extends Component {
 	/** Movement speed in pixels per second. */
 	public speed = 200;
@@ -16,7 +16,7 @@ export class PlayerController extends Component {
 		if (input.isDown("up")) directionY -= 1;
 		if (input.isDown("down")) directionY += 1;
 
-		// Keep diagonal movement the same speed as axis-aligned movement.
+		// Keep diagonals from being faster than straight lines.
 		if (directionX !== 0 && directionY !== 0) {
 			directionX *= Math.SQRT1_2;
 			directionY *= Math.SQRT1_2;

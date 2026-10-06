@@ -1,28 +1,49 @@
 import type { GameObject } from "./GameObject";
 import { InputManager } from "./inputs/InputManager";
 
+/**
+ * The container for a level. It owns the object list, the prefab pools, input,
+ * and the requestAnimationFrame loop. Set `ctx` before starting the loop.
+ */
 export class Scene {
 	public ctx!: CanvasRenderingContext2D;
 
-	/** Keyboard state shared by all components. Attach it to a target to start listening. */
+	/** Shown as the scene label in the editor. */
+	public name = "Main";
+
+	/** The editor uses this to refresh its tree. Starts as a no-op. */
+	public onHierarchyChanged: () => void = () => {};
+
+	/** Keyboard state shared by every component. Attach it to start listening. */
 	public readonly input = new InputManager();
 
 	// Object pooling
 	private pools = new Map<string, GameObject[]>();
 	private prefabs = new Map<string, () => GameObject>();
-	private allObjects: GameObject[] = [];
+
+	/**
+	 * Every object the scene has created, including inactive pooled ones. This
+	 * is what the editor reads for the hierarchy, so check `isActive` before
+	 * using an entry.
+	 */
+	public allObjects: GameObject[] = [];
 
 	// Game loop
 	private lastTime = 0;
 	private isRunning = false;
+	private pendingResize: {
+		width: number;
+		height: number;
+		pixelRatio: number;
+	} | null = null;
 
-	/** Tells the engine how to build a prefab when its pool is empty. */
+	/** Registers a factory. `spawn` uses it when the pool for this name is empty. */
 	public registerPrefab(name: string, factory: () => GameObject): void {
 		this.prefabs.set(name, factory);
 		this.pools.set(name, []);
 	}
 
-	/** Creates or recycles a prefab instance at the given position. */
+	/** Creates or recycles a prefab at a position, then enables it and its children. */
 	public spawn(prefabName: string, x: number, y: number): GameObject {
 		const pool = this.pools.get(prefabName);
 		const factory = this.prefabs.get(prefabName);
@@ -37,17 +58,55 @@ export class Scene {
 			obj = factory();
 			obj.scene = this;
 			pool.push(obj);
-			this.allObjects.push(obj);
 		}
 
 		obj.x = x;
 		obj.y = y;
-		obj.enable();
 
+		// A prefab may return a parent with children; bring the whole subtree in.
+		this.registerSubtree(obj);
+		this.enableSubtree(obj);
+
+		this.onHierarchyChanged();
 		return obj;
 	}
 
-	/** Starts the requestAnimationFrame loop. */
+	/** Adds an object and its descendants to `allObjects`. */
+	private registerSubtree(object: GameObject): void {
+		if (!this.allObjects.includes(object)) this.allObjects.push(object);
+		const children = object.getChildren();
+		for (let i = 0; i < children.length; i++) {
+			children[i].scene = this;
+			this.registerSubtree(children[i]);
+		}
+	}
+
+	/** Turns an object and its descendants on. */
+	private enableSubtree(object: GameObject): void {
+		object.enable();
+		const children = object.getChildren();
+		for (let i = 0; i < children.length; i++) this.enableSubtree(children[i]);
+	}
+
+	/**
+	 * Detaches the object from its parent and turns it and its children off.
+	 * The subtree stays intact, so a later `spawn` can reuse it from the pool.
+	 */
+	public destroy(obj: GameObject): void {
+		obj.parent?.removeChild(obj);
+		this.deactivateSubtree(obj);
+		this.onHierarchyChanged();
+	}
+
+	private deactivateSubtree(object: GameObject): void {
+		object.destroy();
+		const children = object.getChildren();
+		for (let i = 0; i < children.length; i++) {
+			this.deactivateSubtree(children[i]);
+		}
+	}
+
+	/** Starts the requestAnimationFrame loop. Calling it twice does nothing. */
 	public startLoop(): void {
 		if (this.isRunning) return;
 		this.isRunning = true;
@@ -59,8 +118,37 @@ export class Scene {
 		this.isRunning = false;
 	}
 
+	/**
+	 * Reports the canvas viewport in CSS pixels. While the loop is running the
+	 * resize waits for the start of the next frame, so the buffer is never
+	 * cleared after a frame has already been drawn (that shows up as a flash).
+	 */
+	public resize(width: number, height: number, pixelRatio: number): void {
+		if (this.isRunning && this.ctx) {
+			this.pendingResize = { width, height, pixelRatio };
+			return;
+		}
+		this.applyResize(width, height, pixelRatio);
+	}
+
+	private applyResize(width: number, height: number, pixelRatio: number): void {
+		if (!this.ctx) return;
+
+		const canvas = this.ctx.canvas;
+		canvas.width = Math.max(1, Math.round(width * pixelRatio));
+		canvas.height = Math.max(1, Math.round(height * pixelRatio));
+		// Setting width/height resets the transform, so re-apply the DPI scale.
+		this.ctx.scale(pixelRatio, pixelRatio);
+	}
+
 	private tick(currentTime: number): void {
 		if (!this.isRunning) return;
+
+		const pending = this.pendingResize;
+		if (pending) {
+			this.pendingResize = null;
+			this.applyResize(pending.width, pending.height, pending.pixelRatio);
+		}
 
 		const deltaTime = (currentTime - this.lastTime) / 1000;
 		this.lastTime = currentTime;
@@ -74,14 +162,14 @@ export class Scene {
 			}
 		}
 
-		// Clear per-frame input edges after every component has observed them.
+		// Clear per-frame input edges after every component has read them.
 		this.input.endFrame();
 
 		this.drawDebugOverlay();
 		requestAnimationFrame((time) => this.tick(time));
 	}
 
-	/** Temporary on-screen diagnostics, drawn on top of the frame. */
+	/** Temporary numbers on the canvas. Drawn last so objects cannot cover them. */
 	private drawDebugOverlay(): void {
 		this.ctx.fillStyle = "white";
 		this.ctx.font = "20px monospace";

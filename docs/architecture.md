@@ -7,13 +7,13 @@ Voxen is two layers that share one object. The core is plain TypeScript and owns
 ```
 +----------------------------+      a Scene instance      +-------------------------------+
 |  Editor (React and DOM)    |  ----------------------->  |  Engine core (Canvas 2D)      |
-|  GameViewport, routes      |    components, bindings    |  Scene -> GameObject -> Comp  |
-|  Play/Edit UI (planned)    |  <-----------------------  |  update and draw on each rAF  |
-+----------------------------+      reads scene state     +-------------------------------+
+|  Hierarchy, Inspector      |    components, bindings    |  Scene -> GameObject -> Comp  |
+|  GameViewport, routes      |  <-----------------------  |  update and draw on each rAF  |
++----------------------------+   object list + selection  +-------------------------------+
 ```
 
 - **`src/core/`** is the engine. No React, no routing, no editor imports. It can use browser APIs like `CanvasRenderingContext2D`, `HTMLImageElement`, `KeyboardEvent`, and `requestAnimationFrame`, but it never assumes a React tree exists.
-- **`src/editor/` and `src/routes/`** are the UI. React builds the DOM, and the engine draws into the canvas. They meet in one place: a React effect creates a `Scene` and passes it the canvas.
+- **`src/editor/` and `src/routes/`** are the UI. React builds the DOM, and the engine draws into the canvas. They meet in one place: the editor provider creates a `Scene`, the viewport gives it the canvas, and the hierarchy reads the same object list.
 
 The editor does not keep game state in React state. React state drives the editor UI; the `Scene` drives the game. That separation is what keeps the frame loop out of React's render cycle.
 
@@ -23,12 +23,24 @@ The editor does not keep game state in React state. React state drives the edito
 | --- | --- |
 | `src/core/Component.ts` | Base behavior class and lifecycle hooks. |
 | `src/core/GameObject.ts` | Entity: transform, component list, scene link. |
-| `src/core/Scene.ts` | Game loop, prefab registry, object pool, `InputManager` owner. |
+| `src/core/Scene.ts` | Game loop, prefab registry, object pool, input, and the editor bridge. |
 | `src/core/components/SpriteRenderer.ts` | Draws an image or a fallback rectangle. |
 | `src/core/components/PlayerController.ts` | Sample script that moves an object from input actions. |
+| `src/core/components/DataTypes.ts` | Test component with one field of every inspector type. |
+| `src/core/math/` | `Vector2`, `Vector3`, `Vector4`, `Color`, and `Matrix2D` transform helpers. |
 | `src/core/inputs/InputManager.ts` | Keyboard state tracking and action bindings. |
-| `src/editor/components/GameViewport.tsx` | Mounts the canvas, boots the engine, wires resize and input. |
-| `src/routes/` | TanStack Router file-based routes. |
+| `src/editor/context/EditorContext.tsx` | Owns the shared `Scene` and the current selection. |
+| `src/editor/components/MenuBar.tsx` | Top menu bar; placeholder items for now. |
+| `src/editor/components/GameViewport.tsx` | Mounts the canvas and drives the shared scene. |
+| `src/editor/components/HierarchyPanel.tsx` | Names the scene and lists, selects, renames, and deletes objects. |
+| `src/editor/components/InspectorPanel.tsx` | Tweakpane inspector bound to the selected object. |
+| `src/editor/components/componentRegistry.ts` | Components the inspector can add to an object. |
+| `src/editor/components/ContextMenu.tsx` | Reusable right-click menu. |
+| `src/editor/componentFields.ts` | Field reflection and value copying for components. |
+| `src/editor/components/FilesPanel.tsx` | Placeholder files explorer docked below the hierarchy and scene. |
+| `src/editor/components/LayoutModel.ts` | The default dock layout for the panels. |
+| `src/routes/index.tsx` | Landing page. |
+| `src/routes/engine.tsx` | Builds the layout model and maps tabs to panels. |
 
 ## The frame loop
 
@@ -61,10 +73,20 @@ Allocating during play causes GC pauses, so Voxen reuses objects through pools k
 2. `scene.spawn(name, x, y)` looks for an inactive object already in the pool.
    - If it finds one, it reuses that object. No allocation.
    - If not, it calls the factory, sets `object.scene = scene`, and adds the object to the pool.
-3. `spawn` sets the position and calls `object.enable()`.
-4. `object.destroy()` deactivates the object and leaves it in the pool for the next `spawn`.
+3. `spawn` sets the position, then registers and enables the object's whole subtree, so a prefab can return a parent with children.
+4. `scene.destroy(object)` detaches the object from its parent and deactivates it and its descendants, keeping the subtree intact so the next `spawn` can re-enable it.
 
 Because pooled objects get recycled, `start()` must not run again on reuse. `GameObject.enable()` calls the internal `__internal_start()`, which runs `start()` once per allocation and then fires `onEnable()` on every reactivation.
+
+## Hierarchy
+
+Objects form a tree. `GameObject.parent` points up, `getChildren()` reads down, and a child's `x`, `y`, `rotation`, `scaleX`, and `scaleY` are relative to its parent.
+
+- `setParent(parent, keepWorld)` reparents an object. With `keepWorld` (the default) it recomputes the local transform so the object stays where it is on screen. It refuses to parent an object under one of its own descendants, which would create a cycle.
+- `getWorldMatrix()` composes the object's transform with every ancestor. `SpriteRenderer` draws through that matrix, so moving or rotating a parent moves its children.
+- `scene.destroy(object)` detaches the object from its parent and deactivates it and its descendants, so the whole subtree leaves the scene until it is spawned again.
+
+A prefab factory can return a parent with children; `spawn` registers and enables the subtree. The sample Player is a controls parent (`PlayerController`, `DataTypes`) with a `Sprite` child that holds the image.
 
 ## Component lifecycle
 
@@ -88,7 +110,7 @@ There is no separate `render()` hook right now. Rendering components draw inside
 - In `update()` it wraps drawing in `ctx.save()` and `ctx.restore()`, and applies the object transform with `translate`, `rotate`, and `scale`.
 - It draws centered on the object's origin at `-width / 2` and `-height / 2`.
 
-The viewport handles device pixel ratio. `canvas.width` and `canvas.height` are the CSS size multiplied by `devicePixelRatio`, and the context is scaled to match, so code can keep drawing in CSS pixels.
+The viewport handles device pixel ratio. It watches the canvas container with a `ResizeObserver` and reports the CSS size to `scene.resize`, which multiplies by `devicePixelRatio` to size the backing buffer and scales the context to match. A dock splitter changes the container without firing a window resize, so the report is queued and applied at the start of the next frame. That way the buffer is resized and redrawn in the same frame instead of being cleared after a frame was painted, which would flash.
 
 ## Input
 
@@ -101,12 +123,26 @@ The viewport handles device pixel ratio. `canvas.width` and `canvas.height` are 
 
 The full API is in [input.md](./input.md).
 
+## Editor
+
+The editor is a React layer that owns exactly one `Scene` and never keeps a parallel copy of game state.
+
+- `EditorProvider` creates the `Scene` and holds the selection. `useEditor()` exposes both to the panels.
+- `Scene.name` labels the single scene (`Main`), and the hierarchy shows it at the top.
+- `MenuBar` is a top bar placeholder for the usual File, Edit, View, Settings, and Help menus; it has no actions yet.
+- Panels read `scene.allObjects` for the hierarchy. `scene.onHierarchyChanged` fires when the object list changes, and the provider bumps a version counter so React re-renders. React never polls the scene.
+- `GameViewport` consumes the shared scene from context. It assigns `scene.ctx`, seeds the sample prefab once, attaches input to the canvas, and starts the loop. It does not create its own scene.
+- `routes/engine.tsx` (the `/engine` route) builds a `flexlayout-react` model from `LayoutModel.ts` and maps each tab's component name (`hierarchy`, `scene`, `files`, `inspector`) to a panel. The files panel sits below the hierarchy and scene while the inspector stays full height on the right. The `/` route is the landing page.
+- The hierarchy renders the object tree with expand and collapse. Select, rename, delete, and create objects; drag an object onto another to reparent it (using `setParent` with keep-world). Deleting goes through `scene.destroy(object)`, so the object and its children are removed and returned to their pools. Right-clicking an object opens a context menu to rename, add a child, unparent, duplicate (copying its transform and component values), or delete it.
+- Right-clicking a component title in the inspector opens a context menu to reset (remove and re-add a fresh instance) or remove it. `GameObject.removeComponent` deactivates the component and drops it from the list. The Transform title has a reset action, and any value (including color channels) can be copied or reset to its default. The editor route suppresses the browser's own context menu so only these menus appear.
+- `InspectorPanel` builds a Tweakpane pane for the selected object. It reflects every public field on the object and its components, auto-detects the view from the value (number, string, boolean, point, and color as a preview swatch, a native color picker, and R, G, B, A inputs), and formats the field names. A search input at the bottom filters `componentRegistry.ts` and adds the chosen component on Enter or click. Edits mutate the live engine objects so they show in the canvas immediately. `DataTypes` is a test component that holds one field of each type. Tweakpane is imported lazily so it never loads during SSR.
+
 ## Server-side rendering
 
 The app runs under TanStack Start, which renders routes on the server. The engine is client-only:
 
-- `InputManager` and `Scene` do not touch `window` at module scope, so importing them during SSR is safe.
-- All engine setup happens inside `useEffect` in `GameViewport`, which only runs in the browser.
+- `InputManager` and `Scene` do not touch `window` at module scope, so importing them during SSR is safe. `EditorProvider` creates the `Scene` during render for the same reason.
+- Canvas and input setup happen inside `useEffect` in `GameViewport`, which only runs in the browser, so the loop never starts on the server.
 
 Keep it that way. Avoid top-level `window` or `document` access in `src/core/`.
 
@@ -145,6 +181,7 @@ if (this.scene.input.wasPressed("jump")) {
 ## Gotchas
 
 - **No React in `src/core/`.** If a core file needs React, the logic belongs in `src/editor/`.
+- **The scene is the single source of truth.** Mutate the `Scene` and let `onHierarchyChanged` refresh the UI; do not mirror objects into React state.
 - **Pooling means reuse.** `start()` does not run on every spawn. Reset per-life state in `onEnable()`.
 - **Canvas input needs focus.** Keyboard listeners are on the canvas, so it has to be focused. The viewport focuses it on mount and on click.
 - **Set `ctx` before the loop.** The editor assigns `scene.ctx` before calling `startLoop()`.

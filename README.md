@@ -30,13 +30,14 @@ One naming note before anything else: this is an **entity-component** design (co
 
 ## Status
 
-Voxen is in early development. The engine boots, renders sprites, pools objects, and tracks keyboard input end to end. There is **no automated test suite yet**, and nothing here is a stable public API. Right now, correctness is checked with the type checker, the linter, and running the dev server (see [Getting Started](#getting-started)).
+Voxen is in early development. The engine boots, renders sprites, pools objects, and tracks keyboard input, and the editor lists and edits those objects in docked panels. There is **no automated test suite yet**, and nothing here is a stable public API. Right now, correctness is checked with the type checker, the linter, and running the dev server (see [Getting Started](#getting-started)).
 
 ## What works today
 
 Engine side:
 
 - Entity-component style: attach, query, and detach components on any `GameObject`.
+- Parent-child hierarchy: objects form a tree, and children inherit their parent's transform (position, rotation, and scale compose down the tree).
 - Object pooling. Register a prefab once, and spawned instances get recycled instead of allocated every frame.
 - Indexed `for` loops in the update path, so the per-frame hot path does not allocate.
 - Canvas 2D rendering with a `SpriteRenderer` that supports translation, rotation, and scale, and draws a fallback rectangle while a texture loads.
@@ -45,8 +46,14 @@ Engine side:
 
 Editor side:
 
-- A React component that mounts the canvas, boots the engine, and handles window resize.
-- Keyboard listeners attach to the canvas, so typing in editor panels (once those exist) will not drive the game.
+- A top menu bar (File, Edit, View, Settings, Help), a placeholder with no actions yet.
+- A docked layout (`flexlayout-react`): hierarchy and scene across the top, a files explorer beneath them, and the inspector full height on the right.
+- A hierarchy panel that labels the current scene (`Main`) and shows its objects as a tree: expand and collapse children, drag an object onto another to parent it, and rename, delete, or create objects. Right-click an object for a context menu (rename, add child, unparent, duplicate, delete).
+- An inspector panel built with Tweakpane that edits the selected object's transform and each component's fields. It reflects every public field, auto-detects the view from the value (number, string, boolean, point, or color as a preview swatch, a native color picker, and four R, G, B, A inputs), formats the field names, and has a search box at the bottom to add a component by pressing Enter or clicking it. Right-click a component title to reset or remove it, the Transform title to reset the transform, or any value to copy or reset it. The editor suppresses the browser's own context menu.
+- A `DataTypes` test component, attached to the player, that holds one field of every type the inspector can render.
+- A files panel, currently a placeholder for the project's assets.
+- One `Scene` owned by the editor and shared with every panel through React context; panels re-render when the engine changes its object list.
+- A viewport component that mounts the canvas, boots the loop, and keeps input scoped to the canvas.
 
 ## Tech stack
 
@@ -54,6 +61,8 @@ Editor side:
 | --- | --- |
 | Core engine | TypeScript, HTML5 Canvas 2D (`CanvasRenderingContext2D`) |
 | Editor | [React 19](https://react.dev/), [TanStack Start](https://tanstack.com/start) |
+| Editor layout | [flexlayout-react](https://github.com/caplin/FlexLayout) |
+| Inspector | [Tweakpane](https://tweakpane.github.io/docs/) |
 | Routing | [TanStack Router](https://tanstack.com/router) (file-based) |
 | Styling | [Tailwind CSS v4](https://tailwindcss.com/) |
 | Build and tooling | [Vite 8](https://vite.dev/), [Nitro](https://v3.nitro.build/), [Bun](https://bun.sh/) |
@@ -73,7 +82,7 @@ bun install
 bun run dev
 ```
 
-The dev server comes up on [http://localhost:3000](http://localhost:3000).
+The dev server comes up on [http://localhost:3000](http://localhost:3000). The landing page is at `/` and the editor is at `/engine`.
 
 ### Scripts
 
@@ -115,41 +124,16 @@ Favicons, the web manifest, and the 1200x630 social card live in `public/`. Page
 | --- | --- | --- |
 | `VITE_SITE_URL` | `http://localhost:3000` | Public origin used for canonical and Open Graph URLs. Set it for production, for example `VITE_SITE_URL=https://voxen.example bun run build`. |
 
-## Project layout
-
-```text
-public/                     Favicons, web manifest, and the social card
-src/
-  core/                     The engine. No React in here.
-    Component.ts            Base class and lifecycle hooks
-    GameObject.ts           Entity: transform, components, scene link
-    Scene.ts                Game loop, prefab registry, object pool, input
-    components/
-      PlayerController.ts
-      SpriteRenderer.ts
-    inputs/
-      InputManager.ts
-  editor/
-    components/
-      GameViewport.tsx      Mounts the canvas and boots the engine
-  routes/
-    __root.tsx              Document shell and page metadata
-    index.tsx               Home route
-  router.tsx
-  routeTree.gen.ts          Generated. Do not edit.
-  seo.ts                    Site title, description, and social URLs
-  styles.css
-```
+## Core concepts
 
 The one rule worth remembering: **`src/core/` stays framework-agnostic.** No React, no framework imports. Browser APIs are fine. More detail is in [docs/architecture.md](./docs/architecture.md).
-
-## Core concepts
 
 - **`Scene`** owns the game loop, the prefab registry, the object pool, and the `InputManager`. Set `scene.ctx` before you start the loop.
 - **`GameObject`** is an entity. It holds a transform (`x`, `y`, `rotation`, `scaleX`, `scaleY`) and a list of components. Assigning `gameObject.scene` pushes the scene reference into every attached component.
 - **`Component`** is a behavior. Subclass it and override `start()`, `update(deltaTime)`, `onEnable()`, or `onDisable()`. Components reach the engine through `this.gameObject` and `this.scene`.
 - **Prefabs.** Register a factory with `scene.registerPrefab(name, factory)`, then create instances with `scene.spawn(name, x, y)`. `spawn` reuses an inactive pooled object when one is available.
 - **Input.** Bind actions to `KeyboardEvent.code` values, call `scene.input.attach(canvas)`, and read `this.scene.input.isDown("jump")` inside `update()`. The scene calls `input.endFrame()` each tick to clear the one-frame edges.
+- **Editor bridge.** The editor owns one `Scene`. Panels read `scene.allObjects` and re-render when `scene.onHierarchyChanged` fires, so the engine stays framework-agnostic and React never polls.
 
 More detail: [docs/architecture.md](./docs/architecture.md) and [docs/input.md](./docs/input.md).
 

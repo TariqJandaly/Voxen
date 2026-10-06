@@ -1,10 +1,118 @@
-
 @import "tailwindcss";
 
-html, body {
+@theme {
+  --font-sans: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+
+  /* Editor chrome palette. */
+  --color-panel: #252526;
+  --color-panel-alt: #2d2d2d;
+  --color-panel-alt-hover: #37373d;
+  --color-header: #333333;
+  --color-canvas: #1e1e1e;
+  --color-input: #1e1e1e;
+  --color-input-hover: #262626;
+  --color-edge: #1e1e1e;
+  --color-content: #cccccc;
+  --color-content-strong: #dddddd;
+  --color-muted: #888888;
+  --color-selection: #094771;
+  --color-focus: #007fd4;
+  --color-danger: #f44336;
+  --color-accent: #0e639c;
+  --color-accent-hover: #1177bb;
+  --color-accent-foreground: #ffffff;
+}
+
+html {
+  color-scheme: dark;
+}
+
+html,
+body {
   margin: 0;
   padding: 0;
-  overflow: hidden;
-  width: 100%;
-  height: 100%;
+}
+
+/* The editor disables text selection on its chrome; inputs keep it. */
+input,
+textarea {
+  user-select: text;
+}
+
+/* Blocky theme: no rounded corners on native controls. */
+button,
+input,
+select,
+textarea {
+  border-radius: 0;
+}
+
+/*
+ * Blocky theme: flexlayout ships hardcoded radii for tabs, buttons, and
+ * splitters. Override them so the editor stays square.
+ */
+.flexlayout__layout,
+.flexlayout__layout * {
+  border-radius: 0 !important;
+}
+
+/*
+ * Tweakpane inspector, themed to match the editor chrome. Tweakpane reads these
+ * on its root, so scoping them to the container keeps the overrides local.
+ */
+.voxen-inspector {
+  --tp-base-background-color: transparent;
+  --tp-base-border-radius: 0;
+  --tp-base-shadow-color: transparent;
+  --tp-base-font-family: var(--font-sans);
+
+  --tp-container-background-color: var(--color-panel-alt);
+  --tp-container-background-color-hover: var(--color-panel-alt-hover);
+  --tp-container-background-color-focus: var(--color-panel-alt-hover);
+  --tp-container-background-color-active: var(--color-selection);
+  --tp-container-foreground-color: var(--color-content);
+  --tp-container-horizontal-padding: 4px;
+  --tp-container-vertical-padding: 4px;
+
+  --tp-input-background-color: var(--color-input);
+  --tp-input-background-color-hover: var(--color-input-hover);
+  --tp-input-background-color-focus: var(--color-input-hover);
+  --tp-input-background-color-active: var(--color-selection);
+  --tp-input-foreground-color: var(--color-content);
+
+  --tp-label-foreground-color: var(--color-muted);
+  --tp-groove-foreground-color: var(--color-edge);
+
+  --tp-monitor-background-color: var(--color-input);
+  --tp-monitor-foreground-color: var(--color-content);
+
+  --tp-button-background-color: var(--color-accent);
+  --tp-button-background-color-hover: var(--color-accent-hover);
+  --tp-button-background-color-focus: var(--color-accent-hover);
+  --tp-button-background-color-active: var(--color-accent);
+  --tp-button-foreground-color: var(--color-accent-foreground);
+
+  --tp-blade-border-radius: 0;
+  --tp-blade-value-width: 160px;
+}
+
+.voxen-inspector .tp-rotv {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* Blocky theme: flatten Tweakpane's hardcoded radii (swatches, checkboxes). */
+.voxen-inspector .tp-rotv,
+.voxen-inspector .tp-rotv * {
+  border-radius: 0;
+}
+
+/*
+ * Tweakpane flexes the label to fill the row and pins the value to a fixed
+ * width, which leaves a gap on wide panels. Give labeled values most of the row
+ * so the inputs are usable and the gap closes. Blades without a label keep
+ * their full width from Tweakpane's own `tp-lblv-nol` rule.
+ */
+.voxen-inspector .tp-lblv:not(.tp-lblv-nol) .tp-lblv_v {
+  width: 60%;
 }

@@ -1,5 +1,10 @@
 import { TanStackDevtools } from "@tanstack/react-devtools";
-import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
+import {
+	createRootRoute,
+	HeadContent,
+	Link,
+	Scripts,
+} from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { seo } from "../seo";
 import appCss from "../styles.css?url";
@@ -57,7 +62,36 @@ export const Route = createRootRoute({
 		],
 	}),
 	shellComponent: RootDocument,
+	notFoundComponent: NotFound,
 });
+
+function NotFound() {
+	return (
+		<main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-canvas px-6 text-center text-content">
+			<p className="text-sm font-semibold text-muted">404</p>
+			<h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+				This page does not exist
+			</h1>
+			<p className="max-w-md text-base leading-7 text-muted">
+				The link may be broken, or the page may have moved.
+			</p>
+			<div className="mt-2 flex items-center gap-3">
+				<Link
+					to="/"
+					className="bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas motion-reduce:transition-none"
+				>
+					Go Home
+				</Link>
+				<Link
+					to="/engine"
+					className="border border-edge bg-panel px-5 py-2.5 text-sm font-medium text-content transition-colors hover:bg-panel-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas motion-reduce:transition-none"
+				>
+					Open the Editor
+				</Link>
+			</div>
+		</main>
+	);
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
 	return (

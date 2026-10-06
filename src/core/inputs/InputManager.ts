@@ -9,12 +9,12 @@ export interface InputManagerOptions {
 }
 
 /**
- * Tracks keyboard state for the polling game loop.
+ * Keeps track of which keys are down for the loop to read.
  *
- * DOM events mutate the state; game code reads it during `update()`. Edge queries
- * (`wasPressed` / `wasReleased`) stay true until `endFrame()` clears them, so every
- * component sees the same edges within a frame. Attach to a focusable element (e.g. the
- * canvas); `blur` clears held keys so movement never sticks when focus is lost.
+ * DOM events only record state; your components read it in `update`. Press and
+ * release edges stay set until `endFrame()` clears them, so every component sees
+ * the same edges within a frame. Attach it to a focusable element (the canvas);
+ * a `blur` clears held keys so nothing sticks when focus moves away.
  */
 export class InputManager {
 	private bindings: InputBinding;
