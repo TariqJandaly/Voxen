@@ -1,12 +1,13 @@
 import type { GameObject } from "./GameObject";
 import { InputManager } from "./inputs/InputManager";
+import type { Renderer } from "./rendering/Renderer";
 
 /**
  * The container for a level. It owns the object list, the prefab pools, input,
- * and the requestAnimationFrame loop. Set `ctx` before starting the loop.
+ * and the requestAnimationFrame loop. Set `renderer` before starting the loop.
  */
 export class Scene {
-	public ctx!: CanvasRenderingContext2D;
+	public renderer!: Renderer;
 
 	/** Shown as the scene label in the editor. */
 	public name = "Main";
@@ -60,8 +61,8 @@ export class Scene {
 			pool.push(obj);
 		}
 
-		obj.x = x;
-		obj.y = y;
+		obj.transform.position.x = x;
+		obj.transform.position.y = y;
 
 		// A prefab may return a parent with children; bring the whole subtree in.
 		this.registerSubtree(obj);
@@ -141,7 +142,7 @@ export class Scene {
 	 * cleared after a frame has already been drawn (that shows up as a flash).
 	 */
 	public resize(width: number, height: number, pixelRatio: number): void {
-		if (this.isRunning && this.ctx) {
+		if (this.isRunning && this.renderer) {
 			this.pendingResize = { width, height, pixelRatio };
 			return;
 		}
@@ -149,13 +150,8 @@ export class Scene {
 	}
 
 	private applyResize(width: number, height: number, pixelRatio: number): void {
-		if (!this.ctx) return;
-
-		const canvas = this.ctx.canvas;
-		canvas.width = Math.max(1, Math.round(width * pixelRatio));
-		canvas.height = Math.max(1, Math.round(height * pixelRatio));
-		// Setting width/height resets the transform, so re-apply the DPI scale.
-		this.ctx.scale(pixelRatio, pixelRatio);
+		if (!this.renderer) return;
+		this.renderer.resize(width, height, pixelRatio);
 	}
 
 	private tick(currentTime: number): void {
@@ -170,7 +166,7 @@ export class Scene {
 		const deltaTime = (currentTime - this.lastTime) / 1000;
 		this.lastTime = currentTime;
 
-		this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+		this.renderer.clear();
 
 		for (let i = 0; i < this.allObjects.length; i++) {
 			const object = this.allObjects[i];
@@ -188,15 +184,15 @@ export class Scene {
 
 	/** Temporary numbers on the canvas. Drawn last so objects cannot cover them. */
 	private drawDebugOverlay(): void {
-		this.ctx.fillStyle = "white";
-		this.ctx.font = "20px monospace";
-		this.ctx.fillText(
+		this.renderer.setFillColor("white");
+		this.renderer.setFont("20px monospace");
+		this.renderer.drawText(
 			`Loop Running! Objects: ${this.allObjects.length}`,
 			30,
 			50,
 		);
-		this.ctx.fillText(
-			`Canvas Size: ${this.ctx.canvas.width}x${this.ctx.canvas.height}`,
+		this.renderer.drawText(
+			`Canvas Size: ${this.renderer.width}x${this.renderer.height}`,
 			30,
 			80,
 		);

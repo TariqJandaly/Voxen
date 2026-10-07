@@ -1,17 +1,13 @@
 import type { Component } from "./Component";
-import {
-	decomposeMatrix,
-	IDENTITY_MATRIX,
-	invertMatrix,
-	type Matrix2D,
-	multiplyMatrix,
-} from "./math/Matrix2D";
+import { Transform } from "./components/Transform";
+import { IDENTITY_MATRIX, invertMatrix, multiplyMatrix } from "./math/Matrix2D";
 import type { Scene } from "./Scene";
 
 /**
- * An entity in the scene. It holds a transform and a list of components, and it
- * can sit under a parent with children of its own. Positions are local to the
- * parent, so moving a parent moves the whole branch.
+ * An entity in the scene. Every object owns a `Transform` (position, rotation,
+ * scale) and a list of components, and it can sit under a parent with children
+ * of its own. The transform is relative to the parent, so moving a parent moves
+ * the whole branch.
  */
 export class GameObject {
 	public id: string =
@@ -21,12 +17,8 @@ export class GameObject {
 
 	public name: string;
 
-	// Transform, relative to the parent when there is one.
-	public x = 0;
-	public y = 0;
-	public rotation = 0;
-	public scaleX = 1;
-	public scaleY = 1;
+	/** Position, rotation, and scale. Created with the object and never removed. */
+	public readonly transform: Transform;
 
 	// Hierarchy
 	public parent: GameObject | null = null;
@@ -40,15 +32,18 @@ export class GameObject {
 
 	constructor(name = "GameObject") {
 		this.name = name;
+		this.transform = new Transform();
+		this.transform.gameObject = this;
 	}
 
 	public get scene(): Scene {
 		return this._scene;
 	}
 
-	/** Pointing the object at a scene also passes the scene down to its components. */
+	/** Pointing the object at a scene also passes the scene down to its transform and components. */
 	public set scene(value: Scene) {
 		this._scene = value;
+		this.transform.scene = value;
 		for (let i = 0; i < this.components.length; i++) {
 			this.components[i].scene = value;
 		}
@@ -117,7 +112,7 @@ export class GameObject {
 		if (parent === this.parent) return;
 		if (parent && this.isAncestorOf(parent)) return;
 
-		const world = keepWorld ? this.getWorldMatrix() : null;
+		const world = keepWorld ? this.transform.getWorldMatrix() : null;
 
 		this.parent?.removeChild(this);
 		this.parent = parent;
@@ -125,16 +120,11 @@ export class GameObject {
 
 		if (!world) return;
 
-		const parentWorld = parent ? parent.getWorldMatrix() : IDENTITY_MATRIX;
+		const parentWorld = parent
+			? parent.transform.getWorldMatrix()
+			: IDENTITY_MATRIX;
 		const inverse = invertMatrix(parentWorld);
-		if (!inverse) return;
-
-		const local = decomposeMatrix(multiplyMatrix(inverse, world));
-		this.x = local.x;
-		this.y = local.y;
-		this.rotation = local.rotation;
-		this.scaleX = local.scaleX;
-		this.scaleY = local.scaleY;
+		if (inverse) this.transform.setFromMatrix(multiplyMatrix(inverse, world));
 	}
 
 	/** Detaches a child and clears its parent link. */
@@ -143,28 +133,6 @@ export class GameObject {
 		if (index === -1) return;
 		this.children.splice(index, 1);
 		if (child.parent === this) child.parent = null;
-	}
-
-	/** This object's transform as a matrix, relative to its parent. */
-	public getLocalMatrix(): Matrix2D {
-		const cos = Math.cos(this.rotation);
-		const sin = Math.sin(this.rotation);
-		return [
-			cos * this.scaleX,
-			sin * this.scaleX,
-			-sin * this.scaleY,
-			cos * this.scaleY,
-			this.x,
-			this.y,
-		];
-	}
-
-	/** The transform with every ancestor folded in. This is the one rendering uses. */
-	public getWorldMatrix(): Matrix2D {
-		const local = this.getLocalMatrix();
-		return this.parent
-			? multiplyMatrix(this.parent.getWorldMatrix(), local)
-			: local;
 	}
 
 	/** Engine internal: runs `update` on every active component. */

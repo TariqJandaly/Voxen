@@ -37,6 +37,8 @@ Voxen is in early development. The engine boots, renders sprites, pools objects,
 Engine side:
 
 - Entity-component style: attach, query, and detach components on any `GameObject`.
+- A `Transform` on every object: `position`, `rotation`, and `scale` as vectors, composed through the parent hierarchy.
+- Rendering behind a `Renderer` interface with a Canvas 2D backend, so a WebGL or WebGPU backend can be added later without touching components.
 - Parent-child hierarchy: objects form a tree, and children inherit their parent's transform (position, rotation, and scale compose down the tree).
 - Object pooling. Register a prefab once, and spawned instances get recycled instead of allocated every frame.
 - Indexed `for` loops in the update path, so the per-frame hot path does not allocate.
@@ -130,7 +132,7 @@ Favicons, the web manifest, and the 1200x630 social card live in `public/`. Page
 The one rule worth remembering: **`src/core/` stays framework-agnostic.** No React, no framework imports. Browser APIs are fine. More detail is in [docs/architecture.md](./docs/architecture.md).
 
 - **`Scene`** owns the game loop, the prefab registry, the object pool, and the `InputManager`. Set `scene.ctx` before you start the loop.
-- **`GameObject`** is an entity. It holds a transform (`x`, `y`, `rotation`, `scaleX`, `scaleY`) and a list of components. Assigning `gameObject.scene` pushes the scene reference into every attached component.
+- **`GameObject`** is an entity. It owns a `Transform` (`position`, `rotation`, and `scale` as vectors) and a list of components. Assigning `gameObject.scene` pushes the scene reference into every attached component.
 - **`Component`** is a behavior. Subclass it and override `start()`, `update(deltaTime)`, `onEnable()`, or `onDisable()`. Components reach the engine through `this.gameObject` and `this.scene`.
 - **Prefabs.** Register a factory with `scene.registerPrefab(name, factory)`, then create instances with `scene.spawn(name, x, y)`. `spawn` reuses an inactive pooled object when one is available.
 - **Input.** Bind actions to `KeyboardEvent.code` values, call `scene.input.attach(canvas)`, and read `this.scene.input.isDown("jump")` inside `update()`. The scene calls `input.endFrame()` each tick to clear the one-frame edges.

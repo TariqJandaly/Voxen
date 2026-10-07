@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { CanvasRenderer } from "#/core/rendering/CanvasRenderer";
 import { useEditor } from "../context/EditorContext";
 
 /**
@@ -17,7 +18,7 @@ export function GameViewport() {
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
 
-		scene.ctx = ctx;
+		scene.renderer = new CanvasRenderer(ctx);
 		scene.input.setBindings({
 			left: ["ArrowLeft", "KeyA"],
 			right: ["ArrowRight", "KeyD"],

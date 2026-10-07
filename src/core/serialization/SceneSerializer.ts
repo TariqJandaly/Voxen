@@ -8,7 +8,29 @@ export interface SerializedComponent {
 	data: Record<string, unknown>;
 }
 
+/** The `z` fields are carried for the eventual 3D work; 2D ignores them. */
+export interface SerializedTransform {
+	position: { x: number; y: number; z: number };
+	rotation: { x: number; y: number; z: number };
+	scale: { x: number; y: number; z: number };
+}
+
 export interface SerializedObject {
+	name: string;
+	transform: SerializedTransform;
+	components: SerializedComponent[];
+	children: SerializedObject[];
+}
+
+export interface SerializedScene {
+	version: 2;
+	name: string;
+	objects: SerializedObject[];
+}
+
+// The first format kept the transform flat on the object. Kept so old projects
+// can still be loaded.
+export interface SerializedObjectV1 {
 	name: string;
 	x: number;
 	y: number;
@@ -16,14 +38,17 @@ export interface SerializedObject {
 	scaleX: number;
 	scaleY: number;
 	components: SerializedComponent[];
-	children: SerializedObject[];
+	children: SerializedObjectV1[];
 }
 
-export interface SerializedScene {
+export interface SerializedSceneV1 {
 	version: 1;
 	name: string;
-	objects: SerializedObject[];
+	objects: SerializedObjectV1[];
 }
+
+/** Any scene format the loader understands. */
+export type AnySerializedScene = SerializedSceneV1 | SerializedScene;
 
 /** Component classes keyed by `constructor.name`, used to rebuild a scene. */
 export type ComponentTypes = Record<string, new () => Component>;
@@ -35,17 +60,18 @@ export function serializeScene(scene: Scene): SerializedScene {
 		(object) => object.isActive && (!object.parent || !object.parent.isActive),
 	);
 
-	return { version: 1, name: scene.name, objects: roots.map(serializeObject) };
+	return { version: 2, name: scene.name, objects: roots.map(serializeObject) };
 }
 
 function serializeObject(object: GameObject): SerializedObject {
+	const { position, rotation, scale } = object.transform;
 	return {
 		name: object.name,
-		x: object.x,
-		y: object.y,
-		rotation: object.rotation,
-		scaleX: object.scaleX,
-		scaleY: object.scaleY,
+		transform: {
+			position: { x: position.x, y: position.y, z: position.z },
+			rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
+			scale: { x: scale.x, y: scale.y, z: scale.z },
+		},
 		components: object.getComponents().map(serializeComponent),
 		children: object
 			.getChildren()
@@ -71,16 +97,32 @@ function serializeComponent(component: Component): SerializedComponent {
 /** Rebuilds the objects from a snapshot, replacing whatever is in the scene. */
 export function deserializeScene(
 	scene: Scene,
-	data: SerializedScene,
+	data: AnySerializedScene,
 	types: ComponentTypes,
 ): void {
 	// Replace, do not append. Loading twice must not double the objects.
 	scene.clear();
 	scene.name = data.name || scene.name;
 
-	for (const serialized of data.objects) {
+	const objects =
+		data.version === 1 ? data.objects.map(migrateObjectV1) : data.objects;
+	for (const serialized of objects) {
 		scene.add(createObject(serialized, types));
 	}
+}
+
+/** Lifts a v1 flat transform onto the v2 `transform` shape. */
+function migrateObjectV1(object: SerializedObjectV1): SerializedObject {
+	return {
+		name: object.name,
+		transform: {
+			position: { x: object.x, y: object.y, z: 0 },
+			rotation: { x: 0, y: 0, z: object.rotation },
+			scale: { x: object.scaleX, y: object.scaleY, z: 1 },
+		},
+		components: object.components,
+		children: object.children.map(migrateObjectV1),
+	};
 }
 
 function createObject(
@@ -88,11 +130,16 @@ function createObject(
 	types: ComponentTypes,
 ): GameObject {
 	const object = new GameObject(serialized.name);
-	object.x = serialized.x;
-	object.y = serialized.y;
-	object.rotation = serialized.rotation;
-	object.scaleX = serialized.scaleX;
-	object.scaleY = serialized.scaleY;
+	const { position, rotation, scale } = object.transform;
+	position.x = serialized.transform.position.x;
+	position.y = serialized.transform.position.y;
+	position.z = serialized.transform.position.z;
+	rotation.x = serialized.transform.rotation.x;
+	rotation.y = serialized.transform.rotation.y;
+	rotation.z = serialized.transform.rotation.z;
+	scale.x = serialized.transform.scale.x;
+	scale.y = serialized.transform.scale.y;
+	scale.z = serialized.transform.scale.z;
 
 	for (const saved of serialized.components) {
 		const ComponentClass = types[saved.type];

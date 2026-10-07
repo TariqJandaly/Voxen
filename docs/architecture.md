@@ -27,6 +27,8 @@ The editor does not keep game state in React state. React state drives the edito
 | `src/core/components/SpriteRenderer.ts` | Draws an image or a fallback rectangle. |
 | `src/core/components/PlayerController.ts` | Sample script that moves an object from input actions. |
 | `src/core/components/DataTypes.ts` | Test component with one field of every inspector type. |
+| `src/core/components/Transform.ts` | Position, rotation, and scale; every object owns one. |
+| `src/core/rendering/` | The `Renderer` interface and the Canvas 2D backend. |
 | `src/core/math/` | `Vector2`, `Vector3`, `Vector4`, `Color`, and `Matrix2D` transform helpers. |
 | `src/core/inputs/InputManager.ts` | Keyboard state tracking and action bindings. |
 | `src/core/serialization/` | Scene snapshots: read and write objects, transforms, and component fields. |
@@ -84,10 +86,10 @@ Because pooled objects get recycled, `start()` must not run again on reuse. `Gam
 
 ## Hierarchy
 
-Objects form a tree. `GameObject.parent` points up, `getChildren()` reads down, and a child's `x`, `y`, `rotation`, `scaleX`, and `scaleY` are relative to its parent.
+Objects form a tree. `GameObject.parent` points up and `getChildren()` reads down. Each object's `Transform` is relative to its parent: `position`, `rotation`, and `scale` are vectors, and 2D rendering uses `position.xy`, `rotation.z`, and `scale.xy`.
 
 - `setParent(parent, keepWorld)` reparents an object. With `keepWorld` (the default) it recomputes the local transform so the object stays where it is on screen. It refuses to parent an object under one of its own descendants, which would create a cycle.
-- `getWorldMatrix()` composes the object's transform with every ancestor. `SpriteRenderer` draws through that matrix, so moving or rotating a parent moves its children.
+- `Transform.getWorldMatrix()` composes the transform with every ancestor. `SpriteRenderer` draws through that matrix, so moving or rotating a parent moves its children.
 - `scene.destroy(object)` detaches the object from its parent and deactivates it and its descendants, so the whole subtree leaves the scene until it is spawned again.
 
 A prefab factory can return a parent with children; `spawn` registers and enables the subtree.
@@ -97,6 +99,8 @@ A prefab factory can return a parent with children; `spawn` registers and enable
 `serializeScene(scene)` turns the active objects into plain data: each object's name, transform, component list, and children, with every public component field copied out. Colors and vectors come back as plain `{ r, g, b, a }` and `{ x, y }` data, so the result is JSON-friendly.
 
 `deserializeScene(scene, data, types)` rebuilds the tree. It needs a map of component class names to classes (`COMPONENT_TYPES` from the editor's component registry) to recreate components, then writes the saved fields onto fresh instances. Object fields are mutated in place, so a restored `Color` stays a `Color`.
+
+The format is versioned. Version 1 kept the transform flat on the object; the loader migrates it to the version 2 `transform` shape, so older projects still open.
 
 The editor loads a project's scene when it opens and autosaves it back to IndexedDB every couple of seconds and once more on the way out.
 
@@ -111,6 +115,8 @@ The editor loads a project's scene when it opens and autosaves it back to Indexe
 
 Components get `this.gameObject` and `this.scene` injected when you add them with `GameObject.addComponent()`. Assigning `gameObject.scene` propagates the scene reference to every attached component, including ones added later.
 
+Every `GameObject` also owns a `Transform` (`position`, `rotation`, and `scale` as `Vector3`). It is created with the object and is not a normal component, so it cannot be removed by mistake.
+
 There is no separate `render()` hook right now. Rendering components draw inside `update()`. If a dedicated render pass arrives with a future WebGPU backend, that is where it would go. For now, keep drawing at the end of `update()`.
 
 ## Rendering
@@ -119,10 +125,11 @@ There is no separate `render()` hook right now. Rendering components draw inside
 
 - It loads the image in `start()` and tracks an `isLoaded` flag.
 - Until the image arrives, it draws a solid fallback rectangle, so an entity is never invisible.
-- In `update()` it wraps drawing in `ctx.save()` and `ctx.restore()`, and applies the object transform with `translate`, `rotate`, and `scale`.
-- It draws centered on the object's origin at `-width / 2` and `-height / 2`.
+- In `update()` it draws through `this.scene.renderer`: save, apply the object's world matrix, draw, restore. Pixels are centered on the object's origin at `-width / 2` and `-height / 2`.
 
-The viewport handles device pixel ratio. It watches the canvas container with a `ResizeObserver` and reports the CSS size to `scene.resize`, which multiplies by `devicePixelRatio` to size the backing buffer and scales the context to match. A dock splitter changes the container without firing a window resize, so the report is queued and applied at the start of the next frame. That way the buffer is resized and redrawn in the same frame instead of being cleared after a frame was painted, which would flash.
+Drawing goes through the `Renderer` interface (`src/core/rendering/Renderer.ts`) rather than a raw canvas context, so a WebGL or WebGPU backend can be added later without touching components. `CanvasRenderer` is the current 2D backend and owns the device-pixel-ratio sizing.
+
+The viewport watches the canvas container with a `ResizeObserver` and reports the CSS size to `scene.resize`, which sizes the backing buffer and applies the device-pixel-ratio scale. A dock splitter changes the container without firing a window resize, so the report is queued and applied at the start of the next frame, avoiding a one-frame flash.
 
 ## Input
 

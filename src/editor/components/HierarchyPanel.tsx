@@ -60,11 +60,7 @@ export function HierarchyPanel() {
 
 	const duplicateObject = (source: GameObject) => {
 		const copy = new GameObject(`${source.name} copy`);
-		copy.x = source.x;
-		copy.y = source.y;
-		copy.rotation = source.rotation;
-		copy.scaleX = source.scaleX;
-		copy.scaleY = source.scaleY;
+		copyFields(source.transform, copy.transform);
 		copy.scene = scene;
 		if (source.parent) copy.setParent(source.parent, false);
 

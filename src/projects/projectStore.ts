@@ -1,5 +1,5 @@
 import { type IDBPDatabase, openDB } from "idb";
-import type { SerializedScene } from "#/core/serialization/SceneSerializer";
+import type { AnySerializedScene } from "#/core/serialization/SceneSerializer";
 
 /** A saved project with its scene snapshot. */
 export interface Project {
@@ -7,7 +7,7 @@ export interface Project {
 	name: string;
 	createdAt: number;
 	updatedAt: number;
-	scene?: SerializedScene;
+	scene?: AnySerializedScene;
 }
 
 const DB_NAME = "voxen";
@@ -90,7 +90,7 @@ export async function deleteProject(id: string): Promise<void> {
 /** Stores a scene snapshot on its project. Ignored when the id is unknown. */
 export async function saveProjectScene(
 	id: string,
-	scene: SerializedScene,
+	scene: AnySerializedScene,
 ): Promise<void> {
 	const db = await getDb();
 	const project = (await db.get(STORE_NAME, id)) as Project | undefined;

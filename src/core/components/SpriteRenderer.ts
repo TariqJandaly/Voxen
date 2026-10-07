@@ -25,21 +25,14 @@ export class SpriteRenderer extends Component {
 	}
 
 	public update(): void {
-		const ctx = this.scene.ctx;
-		const matrix = this.gameObject.getWorldMatrix();
+		const renderer = this.scene.renderer;
+		const matrix = this.gameObject.transform.getWorldMatrix();
 
-		ctx.save();
-		ctx.transform(
-			matrix[0],
-			matrix[1],
-			matrix[2],
-			matrix[3],
-			matrix[4],
-			matrix[5],
-		);
+		renderer.save();
+		renderer.applyTransform(matrix);
 
 		if (this.isLoaded && this.image) {
-			ctx.drawImage(
+			renderer.drawImage(
 				this.image,
 				-this.width / 2,
 				-this.height / 2,
@@ -48,10 +41,15 @@ export class SpriteRenderer extends Component {
 			);
 		} else {
 			// Stand-in while the image is still coming over the network.
-			ctx.fillStyle = "hotpink";
-			ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+			renderer.setFillColor("hotpink");
+			renderer.fillRect(
+				-this.width / 2,
+				-this.height / 2,
+				this.width,
+				this.height,
+			);
 		}
 
-		ctx.restore();
+		renderer.restore();
 	}
 }

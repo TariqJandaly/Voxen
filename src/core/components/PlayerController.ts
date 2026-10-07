@@ -22,7 +22,8 @@ export class PlayerController extends Component {
 			directionY *= Math.SQRT1_2;
 		}
 
-		this.gameObject.x += directionX * this.speed * deltaTime;
-		this.gameObject.y += directionY * this.speed * deltaTime;
+		const position = this.gameObject.transform.position;
+		position.x += directionX * this.speed * deltaTime;
+		position.y += directionY * this.speed * deltaTime;
 	}
 }

@@ -186,11 +186,16 @@ export function InspectorPanel() {
 		};
 
 		const resetTransform = () => {
-			selectedObject.x = 0;
-			selectedObject.y = 0;
-			selectedObject.rotation = 0;
-			selectedObject.scaleX = 1;
-			selectedObject.scaleY = 1;
+			const { position, rotation, scale } = selectedObject.transform;
+			position.x = 0;
+			position.y = 0;
+			position.z = 0;
+			rotation.x = 0;
+			rotation.y = 0;
+			rotation.z = 0;
+			scale.x = 1;
+			scale.y = 1;
+			scale.z = 1;
 		};
 
 		void import("tweakpane").then(({ Pane }) => {
@@ -212,52 +217,21 @@ export function InspectorPanel() {
 				);
 			});
 
-			const object = selectedObject as unknown as Record<string, unknown>;
-			const xBinding = transform.addBinding(selectedObject, "x", {
-				label: formatLabel("x"),
-				step: 1,
-			});
-			attachValueMenu(
-				xBinding.element,
-				() => object.x,
-				() => resetValue(object, "x"),
-			);
-			const yBinding = transform.addBinding(selectedObject, "y", {
-				label: formatLabel("y"),
-				step: 1,
-			});
-			attachValueMenu(
-				yBinding.element,
-				() => object.y,
-				() => resetValue(object, "y"),
-			);
-			const rotationBinding = transform.addBinding(selectedObject, "rotation", {
-				label: formatLabel("rotation"),
-				step: 0.01,
-			});
-			attachValueMenu(
-				rotationBinding.element,
-				() => object.rotation,
-				() => resetValue(object, "rotation"),
-			);
-			const scaleXBinding = transform.addBinding(selectedObject, "scaleX", {
-				label: formatLabel("scaleX"),
-				step: 0.01,
-			});
-			attachValueMenu(
-				scaleXBinding.element,
-				() => object.scaleX,
-				() => resetValue(object, "scaleX"),
-			);
-			const scaleYBinding = transform.addBinding(selectedObject, "scaleY", {
-				label: formatLabel("scaleY"),
-				step: 0.01,
-			});
-			attachValueMenu(
-				scaleYBinding.element,
-				() => object.scaleY,
-				() => resetValue(object, "scaleY"),
-			);
+			const transformTarget = selectedObject.transform as unknown as Record<
+				string,
+				unknown
+			>;
+			for (const field of ["position", "rotation", "scale"]) {
+				const binding = transform.addBinding(transformTarget, field, {
+					label: formatLabel(field),
+					view: "point3d",
+				});
+				attachValueMenu(
+					binding.element,
+					() => transformTarget[field],
+					() => resetValue(transformTarget, field),
+				);
+			}
 
 			for (const component of selectedObject.getComponents()) {
 				const target = component as unknown as Record<string, unknown>;
