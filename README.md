@@ -37,9 +37,13 @@ Voxen is in early development. The engine boots, renders sprites, pools objects,
 Engine side:
 
 - Entity-component style: attach, query, and detach components on any `GameObject`.
+- Auto-detected extension points: drop a `Component` subclass in `core/components/` and it appears in the inspector's add search; drop a `GameObject` subclass in `core/objects/` and it appears in the hierarchy's create menu. No registration list to update.
 - A `Transform` on every object: `position`, `rotation`, and `scale` as vectors, composed through the parent hierarchy.
 - Rendering behind a `Renderer` interface with a Canvas 2D backend, so a WebGL or WebGPU backend can be added later without touching components.
+- A dedicated render pass with a `render(renderer)` component hook, separate from `update()`.
+- A `Camera` GameObject (pan, zoom, rotation) the scene renders through; a scene with no camera shows a black "No camera active" screen.
 - Parent-child hierarchy: objects form a tree, and children inherit their parent's transform (position, rotation, and scale compose down the tree).
+- Per-object active (enabled) and visible (hidden) flags, each inherited down the tree.
 - Object pooling. Register a prefab once, and spawned instances get recycled instead of allocated every frame.
 - Indexed `for` loops in the update path, so the per-frame hot path does not allocate.
 - Canvas 2D rendering with a `SpriteRenderer` that supports translation, rotation, and scale, and draws a fallback rectangle while a texture loads.
@@ -51,8 +55,8 @@ Editor side:
 - A projects page (`/projects`) to create, rename, delete, and open projects. Each project stores its scene, game objects, and component values, saved in IndexedDB via `idb`.
 - A top menu bar (File, Edit, View, Settings, Help), a placeholder with no actions yet.
 - A docked layout (`flexlayout-react`): hierarchy and scene across the top, a files explorer beneath them, and the inspector full height on the right.
-- A hierarchy panel that labels the current scene (`Main`) and shows its objects as a tree: expand and collapse children, drag an object onto another to parent it, and rename, delete, or create objects. Right-click an object for a context menu (rename, add child, unparent, duplicate, delete).
-- An inspector panel built with Tweakpane that edits the selected object's transform and each component's fields. It reflects every public field, auto-detects the view from the value (number, string, boolean, point, or color as a preview swatch, a native color picker, and four R, G, B, A inputs), formats the field names, and has a search box at the bottom to add a component by pressing Enter or clicking it. Right-click a component title to reset or remove it, the Transform title to reset the transform, or any value to copy or reset it. The editor suppresses the browser's own context menu.
+- A hierarchy panel that labels the current scene (`Main`) and shows its objects as a tree: expand and collapse children, drag an object onto another to parent it, and rename or create objects. Each row has an enable checkbox and a visibility (eye) toggle. The + button and "Add Child" build their menu from every GameObject under `core/objects/`, so a new type appears on its own. Right-click an object for a context menu (rename, add child, unparent, duplicate, delete).
+- An inspector panel built with Tweakpane that edits the selected object's own fields (such as a camera's zoom), its transform, and each component's fields. It auto-detects the view from the value (number, string, boolean, point, or color as a preview swatch, a native color picker, and four R, G, B, A inputs), formats the field names, and has a search box at the bottom to add a component by pressing Enter or clicking it. Right-click a component title to reset or remove it, the Transform title to reset the transform, or any value to copy or reset it. The editor suppresses the browser's own context menu.
 - A `DataTypes` test component, attached to the player, that holds one field of every type the inspector can render.
 - A files panel, currently a placeholder for the project's assets.
 - One `Scene` owned by the editor and shared with every panel through React context; panels re-render when the engine changes its object list.
@@ -131,9 +135,9 @@ Favicons, the web manifest, and the 1200x630 social card live in `public/`. Page
 
 The one rule worth remembering: **`src/core/` stays framework-agnostic.** No React, no framework imports. Browser APIs are fine. More detail is in [docs/architecture.md](./docs/architecture.md).
 
-- **`Scene`** owns the game loop, the prefab registry, the object pool, and the `InputManager`. Set `scene.ctx` before you start the loop.
-- **`GameObject`** is an entity. It owns a `Transform` (`position`, `rotation`, and `scale` as vectors) and a list of components. Assigning `gameObject.scene` pushes the scene reference into every attached component.
-- **`Component`** is a behavior. Subclass it and override `start()`, `update(deltaTime)`, `onEnable()`, or `onDisable()`. Components reach the engine through `this.gameObject` and `this.scene`.
+- **`Scene`** owns the game loop, the prefab registry, the object pool, and the `InputManager`. Set `scene.renderer` before you start the loop, and add a `Camera` object so the scene has something to render through.
+- **`GameObject`** is an entity. It owns a `Transform` (`position`, `rotation`, and `scale` as vectors) and a list of components. Assigning `gameObject.scene` pushes the scene reference into every attached component. The `isActive` and `isVisible` flags control whether it updates and draws.
+- **`Component`** is a behavior. Subclass it and override `start()`, `update(deltaTime)`, `render(renderer)`, `onEnable()`, or `onDisable()`. Components reach the engine through `this.gameObject` and `this.scene`.
 - **Prefabs.** Register a factory with `scene.registerPrefab(name, factory)`, then create instances with `scene.spawn(name, x, y)`. `spawn` reuses an inactive pooled object when one is available.
 - **Input.** Bind actions to `KeyboardEvent.code` values, call `scene.input.attach(canvas)`, and read `this.scene.input.isDown("jump")` inside `update()`. The scene calls `input.endFrame()` each tick to clear the one-frame edges.
 - **Editor bridge.** The editor owns one `Scene`. Panels read `scene.allObjects` and re-render when `scene.onHierarchyChanged` fires, so the engine stays framework-agnostic and React never polls.
@@ -145,10 +149,12 @@ More detail: [docs/architecture.md](./docs/architecture.md) and [docs/input.md](
 This is the shape of the code in [GameViewport.tsx](./src/editor/components/GameViewport.tsx).
 
 ```ts
+import { Camera } from "#/core/objects/Camera";
 import { Component } from "#/core/Component";
 import { PlayerController } from "#/core/components/PlayerController";
 import { SpriteRenderer } from "#/core/components/SpriteRenderer";
 import { GameObject } from "#/core/GameObject";
+import { CanvasRenderer } from "#/core/rendering/CanvasRenderer";
 import { Scene } from "#/core/Scene";
 
 const canvas = document.querySelector("canvas");
@@ -158,7 +164,11 @@ const ctx = canvas.getContext("2d");
 if (!ctx) throw new Error("Could not get a 2D context");
 
 const scene = new Scene();
-scene.ctx = ctx;
+scene.renderer = new CanvasRenderer(ctx);
+scene.resize(canvas.clientWidth, canvas.clientHeight, window.devicePixelRatio || 1);
+
+// A scene needs an active camera to render.
+scene.add(new Camera("Main Camera"));
 
 // Bind named actions to physical keys.
 scene.input.setBindings({
@@ -197,7 +207,7 @@ class Dash extends Component {
   public update(deltaTime: number): void {
     // Needs a "dash" binding, for example: scene.input.setBindings({ dash: "Space" }).
     if (this.scene.input.wasPressed("dash")) {
-      this.gameObject.x += this.speed * deltaTime;
+      this.gameObject.transform.position.x += this.speed * deltaTime;
     }
   }
 }
