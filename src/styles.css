@@ -31,6 +31,8 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /* The engine is chrome, not a document; keep selection to the inputs. */
+  user-select: none;
 }
 
 /* The editor disables text selection on its chrome; inputs keep it. */
@@ -43,8 +45,13 @@ textarea {
 button,
 input,
 select,
-textarea {
+textarea,
+dialog {
   border-radius: 0;
+}
+
+dialog::backdrop {
+  background-color: rgb(0 0 0 / 0.6);
 }
 
 /*

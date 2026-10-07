@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Layout, Model, type TabNode } from "flexlayout-react";
 import "flexlayout-react/style/dark.css";
 import { useEffect, useRef, useState } from "react";
@@ -9,17 +9,49 @@ import { InspectorPanel } from "#/editor/components/InspectorPanel";
 import { defaultLayout } from "#/editor/components/LayoutModel";
 import { MenuBar } from "#/editor/components/MenuBar";
 import { EditorProvider } from "#/editor/context/EditorContext";
+import { getProject, type Project } from "#/projects/projectStore";
+
+export const Route = createFileRoute("/engine/$id")({
+	component: EngineRoute,
+});
+
+/** Loads the project, then hands off to the editor. Unknown ids go to /projects. */
+function EngineRoute() {
+	const { id } = Route.useParams();
+	const navigate = useNavigate();
+	const [project, setProject] = useState<Project | null>(null);
+
+	useEffect(() => {
+		let active = true;
+		void getProject(id).then((found) => {
+			if (!active) return;
+			if (found) setProject(found);
+			else void navigate({ to: "/projects", replace: true });
+		});
+		return () => {
+			active = false;
+		};
+	}, [id, navigate]);
+
+	if (!project) {
+		return (
+			<div className="flex h-dvh items-center justify-center bg-canvas text-sm text-muted">
+				Loading project…
+			</div>
+		);
+	}
+
+	return <Editor project={project} />;
+}
 
 /**
- * The `/engine` route. Builds the dock layout once and hands each tab to its
- * panel.
+ * The editor dock. Builds the layout once and hands each tab to its panel. The
+ * editor supplies its own context menus, so the browser's are suppressed.
  */
-function Engine() {
-	// Build the model a single time; recreating it would reset the dock layout.
+function Editor({ project }: { project: Project }) {
 	const [model] = useState(() => Model.fromJson(defaultLayout));
 	const rootRef = useRef<HTMLDivElement>(null);
 
-	// The editor supplies its own context menus, so suppress the browser's.
 	useEffect(() => {
 		const element = rootRef.current;
 		if (!element) return;
@@ -28,7 +60,6 @@ function Engine() {
 		return () => element.removeEventListener("contextmenu", suppress);
 	}, []);
 
-	// flexlayout calls this for every tab and expects a React node per component.
 	const factory = (node: TabNode) => {
 		switch (node.getComponent()) {
 			case "scene":
@@ -45,13 +76,12 @@ function Engine() {
 	};
 
 	return (
-		<EditorProvider>
+		<EditorProvider project={project}>
 			<div
 				ref={rootRef}
 				className="absolute inset-0 flex select-none flex-col overflow-hidden"
 			>
 				<MenuBar />
-				{/* Positioned so flexlayout's absolute root stays below the menu bar. */}
 				<div className="relative min-h-0 flex-1">
 					<Layout model={model} factory={factory} />
 				</div>
@@ -59,7 +89,3 @@ function Engine() {
 		</EditorProvider>
 	);
 }
-
-export const Route = createFileRoute("/engine")({
-	component: Engine,
-});

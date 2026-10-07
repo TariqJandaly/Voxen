@@ -50,7 +50,7 @@ function Home() {
 				</p>
 				<div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
 					<Link
-						to="/engine"
+						to="/projects"
 						className={`w-full bg-accent px-6 py-3 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover sm:w-auto ${linkFocus}`}
 					>
 						Open the Editor

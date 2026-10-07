@@ -10,43 +10,63 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as EngineRouteImport } from './routes/engine'
+import { Route as ProjectsRouteImport } from './routes/projects'
+import { Route as EngineIndexRouteImport } from './routes/engine.index'
+import { Route as EngineIdRouteImport } from './routes/engine.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EngineRoute = EngineRouteImport.update({
-  id: '/engine',
-  path: '/engine',
+const ProjectsRoute = ProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EngineIndexRoute = EngineIndexRouteImport.update({
+  id: '/engine/',
+  path: '/engine/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EngineIdRoute = EngineIdRouteImport.update({
+  id: '/engine/$id',
+  path: '/engine/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/engine': typeof EngineRoute
+  '/projects': typeof ProjectsRoute
+  '/engine/$id': typeof EngineIdRoute
+  '/engine/': typeof EngineIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/engine': typeof EngineRoute
+  '/projects': typeof ProjectsRoute
+  '/engine/$id': typeof EngineIdRoute
+  '/engine': typeof EngineIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/engine': typeof EngineRoute
+  '/projects': typeof ProjectsRoute
+  '/engine/$id': typeof EngineIdRoute
+  '/engine/': typeof EngineIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/engine'
+  fullPaths: '/' | '/projects' | '/engine/$id' | '/engine/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/engine'
-  id: '__root__' | '/' | '/engine'
+  to: '/' | '/projects' | '/engine/$id' | '/engine'
+  id: '__root__' | '/' | '/projects' | '/engine/$id' | '/engine/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  EngineRoute: typeof EngineRoute
+  ProjectsRoute: typeof ProjectsRoute
+  EngineIdRoute: typeof EngineIdRoute
+  EngineIndexRoute: typeof EngineIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -58,11 +78,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/engine': {
-      id: '/engine'
+    '/projects': {
+      id: '/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof ProjectsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/engine/': {
+      id: '/engine/'
       path: '/engine'
-      fullPath: '/engine'
-      preLoaderRoute: typeof EngineRouteImport
+      fullPath: '/engine/'
+      preLoaderRoute: typeof EngineIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/engine/$id': {
+      id: '/engine/$id'
+      path: '/engine/$id'
+      fullPath: '/engine/$id'
+      preLoaderRoute: typeof EngineIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -70,7 +104,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  EngineRoute: EngineRoute,
+  ProjectsRoute: ProjectsRoute,
+  EngineIdRoute: EngineIdRoute,
+  EngineIndexRoute: EngineIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

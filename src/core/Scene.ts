@@ -71,6 +71,14 @@ export class Scene {
 		return obj;
 	}
 
+	/** Adds an existing object (and its children) to the scene and turns it on. */
+	public add(object: GameObject): void {
+		object.scene = this;
+		this.registerSubtree(object);
+		this.enableSubtree(object);
+		this.onHierarchyChanged();
+	}
+
 	/** Adds an object and its descendants to `allObjects`. */
 	private registerSubtree(object: GameObject): void {
 		if (!this.allObjects.includes(object)) this.allObjects.push(object);
@@ -104,6 +112,15 @@ export class Scene {
 		for (let i = 0; i < children.length; i++) {
 			this.deactivateSubtree(children[i]);
 		}
+	}
+
+	/** Removes every active object from the scene. */
+	public clear(): void {
+		const roots = this.allObjects.filter(
+			(object) =>
+				object.isActive && (!object.parent || !object.parent.isActive),
+		);
+		for (let i = 0; i < roots.length; i++) this.destroy(roots[i]);
 	}
 
 	/** Starts the requestAnimationFrame loop. Calling it twice does nothing. */

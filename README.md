@@ -46,6 +46,7 @@ Engine side:
 
 Editor side:
 
+- A projects page (`/projects`) to create, rename, delete, and open projects. Each project stores its scene, game objects, and component values, saved in IndexedDB via `idb`.
 - A top menu bar (File, Edit, View, Settings, Help), a placeholder with no actions yet.
 - A docked layout (`flexlayout-react`): hierarchy and scene across the top, a files explorer beneath them, and the inspector full height on the right.
 - A hierarchy panel that labels the current scene (`Main`) and shows its objects as a tree: expand and collapse children, drag an object onto another to parent it, and rename, delete, or create objects. Right-click an object for a context menu (rename, add child, unparent, duplicate, delete).
@@ -82,7 +83,7 @@ bun install
 bun run dev
 ```
 
-The dev server comes up on [http://localhost:3000](http://localhost:3000). The landing page is at `/` and the editor is at `/engine`.
+The dev server comes up on [http://localhost:3000](http://localhost:3000). The landing page is at `/`, projects are at `/projects`, and the editor runs at `/engine/:id`.
 
 ### Scripts
 

@@ -1,5 +1,4 @@
 import tailwindcss from "@tailwindcss/vite";
-import { devtools } from "@tanstack/devtools-vite";
 
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 
@@ -11,7 +10,6 @@ const config = defineConfig({
 	server: { allowedHosts: true },
 	resolve: { tsconfigPaths: true },
 	plugins: [
-		devtools(),
 		nitro({ rollupConfig: { external: [/^@sentry\//] } }),
 		tailwindcss(),
 		tanstackStart(),

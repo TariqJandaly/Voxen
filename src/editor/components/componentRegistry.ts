@@ -9,3 +9,12 @@ export const COMPONENT_REGISTRY: ReadonlyArray<new () => Component> = [
 	PlayerController,
 	SpriteRenderer,
 ];
+
+/** The same components keyed by class name, for rebuilding a saved scene. */
+export const COMPONENT_TYPES: Record<string, new () => Component> =
+	Object.fromEntries(
+		COMPONENT_REGISTRY.map((ComponentClass) => [
+			ComponentClass.name,
+			ComponentClass,
+		]),
+	);

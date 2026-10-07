@@ -29,6 +29,7 @@ The editor does not keep game state in React state. React state drives the edito
 | `src/core/components/DataTypes.ts` | Test component with one field of every inspector type. |
 | `src/core/math/` | `Vector2`, `Vector3`, `Vector4`, `Color`, and `Matrix2D` transform helpers. |
 | `src/core/inputs/InputManager.ts` | Keyboard state tracking and action bindings. |
+| `src/core/serialization/` | Scene snapshots: read and write objects, transforms, and component fields. |
 | `src/editor/context/EditorContext.tsx` | Owns the shared `Scene` and the current selection. |
 | `src/editor/components/MenuBar.tsx` | Top menu bar; placeholder items for now. |
 | `src/editor/components/GameViewport.tsx` | Mounts the canvas and drives the shared scene. |
@@ -40,7 +41,10 @@ The editor does not keep game state in React state. React state drives the edito
 | `src/editor/components/FilesPanel.tsx` | Placeholder files explorer docked below the hierarchy and scene. |
 | `src/editor/components/LayoutModel.ts` | The default dock layout for the panels. |
 | `src/routes/index.tsx` | Landing page. |
-| `src/routes/engine.tsx` | Builds the layout model and maps tabs to panels. |
+| `src/routes/projects.tsx` | Project list: create, rename, delete, and open. |
+| `src/routes/engine.$id.tsx` | Editor for one project; builds the dock layout. |
+| `src/routes/engine.index.tsx` | Redirects `/engine` to `/projects`. |
+| `src/projects/projectStore.ts` | Project persistence in IndexedDB (idb). |
 
 ## The frame loop
 
@@ -86,7 +90,15 @@ Objects form a tree. `GameObject.parent` points up, `getChildren()` reads down, 
 - `getWorldMatrix()` composes the object's transform with every ancestor. `SpriteRenderer` draws through that matrix, so moving or rotating a parent moves its children.
 - `scene.destroy(object)` detaches the object from its parent and deactivates it and its descendants, so the whole subtree leaves the scene until it is spawned again.
 
-A prefab factory can return a parent with children; `spawn` registers and enables the subtree. The sample Player is a controls parent (`PlayerController`, `DataTypes`) with a `Sprite` child that holds the image.
+A prefab factory can return a parent with children; `spawn` registers and enables the subtree.
+
+## Serialization
+
+`serializeScene(scene)` turns the active objects into plain data: each object's name, transform, component list, and children, with every public component field copied out. Colors and vectors come back as plain `{ r, g, b, a }` and `{ x, y }` data, so the result is JSON-friendly.
+
+`deserializeScene(scene, data, types)` rebuilds the tree. It needs a map of component class names to classes (`COMPONENT_TYPES` from the editor's component registry) to recreate components, then writes the saved fields onto fresh instances. Object fields are mutated in place, so a restored `Color` stays a `Color`.
+
+The editor loads a project's scene when it opens and autosaves it back to IndexedDB every couple of seconds and once more on the way out.
 
 ## Component lifecycle
 
@@ -127,12 +139,12 @@ The full API is in [input.md](./input.md).
 
 The editor is a React layer that owns exactly one `Scene` and never keeps a parallel copy of game state.
 
-- `EditorProvider` creates the `Scene` and holds the selection. `useEditor()` exposes both to the panels.
+- `EditorProvider` creates the `Scene` for the open project, loads its saved objects, holds the selection, and autosaves. `useEditor()` exposes the scene and selection to the panels.
 - `Scene.name` labels the single scene (`Main`), and the hierarchy shows it at the top.
 - `MenuBar` is a top bar placeholder for the usual File, Edit, View, Settings, and Help menus; it has no actions yet.
 - Panels read `scene.allObjects` for the hierarchy. `scene.onHierarchyChanged` fires when the object list changes, and the provider bumps a version counter so React re-renders. React never polls the scene.
 - `GameViewport` consumes the shared scene from context. It assigns `scene.ctx`, seeds the sample prefab once, attaches input to the canvas, and starts the loop. It does not create its own scene.
-- `routes/engine.tsx` (the `/engine` route) builds a `flexlayout-react` model from `LayoutModel.ts` and maps each tab's component name (`hierarchy`, `scene`, `files`, `inspector`) to a panel. The files panel sits below the hierarchy and scene while the inspector stays full height on the right. The `/` route is the landing page.
+- `routes/engine.$id.tsx` (the `/engine/:id` route) loads the project from IndexedDB, names the scene after it, then builds a `flexlayout-react` model from `LayoutModel.ts` and maps each tab's component name (`hierarchy`, `scene`, `files`, `inspector`) to a panel. An unknown id falls back to `/projects`, and `/engine` redirects there too. The `/` route is the landing page and `/projects` lists projects.
 - The hierarchy renders the object tree with expand and collapse. Select, rename, delete, and create objects; drag an object onto another to reparent it (using `setParent` with keep-world). Deleting goes through `scene.destroy(object)`, so the object and its children are removed and returned to their pools. Right-clicking an object opens a context menu to rename, add a child, unparent, duplicate (copying its transform and component values), or delete it.
 - Right-clicking a component title in the inspector opens a context menu to reset (remove and re-add a fresh instance) or remove it. `GameObject.removeComponent` deactivates the component and drops it from the list. The Transform title has a reset action, and any value (including color channels) can be copied or reset to its default. The editor route suppresses the browser's own context menu so only these menus appear.
 - `InspectorPanel` builds a Tweakpane pane for the selected object. It reflects every public field on the object and its components, auto-detects the view from the value (number, string, boolean, point, and color as a preview swatch, a native color picker, and R, G, B, A inputs), and formats the field names. A search input at the bottom filters `componentRegistry.ts` and adds the chosen component on Enter or click. Edits mutate the live engine objects so they show in the canvas immediately. `DataTypes` is a test component that holds one field of each type. Tweakpane is imported lazily so it never loads during SSR.
