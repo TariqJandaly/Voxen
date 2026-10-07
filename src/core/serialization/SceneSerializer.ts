@@ -1,7 +1,12 @@
 import type { Component } from "../Component";
 import { GameObject } from "../GameObject";
 import type { Scene } from "../Scene";
-import { cloneFieldValue, componentFieldNames, isRecord } from "./fields";
+import {
+	cloneFieldValue,
+	componentFieldNames,
+	isRecord,
+	objectFieldNames,
+} from "./fields";
 
 export interface SerializedComponent {
 	type: string;
@@ -16,8 +21,14 @@ export interface SerializedTransform {
 }
 
 export interface SerializedObject {
+	/** `constructor.name` of the GameObject, so subclasses like Camera rebuild. */
+	type: string;
 	name: string;
+	active: boolean;
+	visible: boolean;
 	transform: SerializedTransform;
+	/** Fields on the object itself, such as a camera's zoom. */
+	objectData: Record<string, unknown>;
 	components: SerializedComponent[];
 	children: SerializedObject[];
 }
@@ -53,45 +64,56 @@ export type AnySerializedScene = SerializedSceneV1 | SerializedScene;
 /** Component classes keyed by `constructor.name`, used to rebuild a scene. */
 export type ComponentTypes = Record<string, new () => Component>;
 
+/** GameObject classes (including subclasses like Camera) keyed by `constructor.name`. */
+export type GameObjectTypes = Record<string, new (name?: string) => GameObject>;
+
 /** Snapshots a scene: the object tree with transforms and component fields. */
 export function serializeScene(scene: Scene): SerializedScene {
-	// Roots are active objects whose parent is missing or inactive.
-	const roots = scene.allObjects.filter(
-		(object) => object.isActive && (!object.parent || !object.parent.isActive),
-	);
-
+	const roots = scene.allObjects.filter((object) => !object.parent);
 	return { version: 2, name: scene.name, objects: roots.map(serializeObject) };
 }
 
 function serializeObject(object: GameObject): SerializedObject {
 	const { position, rotation, scale } = object.transform;
 	return {
+		type: object.constructor.name,
 		name: object.name,
+		active: object.isActive,
+		visible: object.isVisible,
 		transform: {
 			position: { x: position.x, y: position.y, z: position.z },
 			rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
 			scale: { x: scale.x, y: scale.y, z: scale.z },
 		},
+		objectData: serializeFields(object, objectFieldNames(object)),
 		components: object.getComponents().map(serializeComponent),
-		children: object
-			.getChildren()
-			.filter((child) => child.isActive)
-			.map(serializeObject),
+		children: object.getChildren().map(serializeObject),
 	};
 }
 
 function serializeComponent(component: Component): SerializedComponent {
-	const target = component as unknown as Record<string, unknown>;
+	return {
+		type: component.constructor.name,
+		data: serializeFields(component, componentFieldNames(component)),
+	};
+}
+
+/** Copies named public fields, skipping functions and empty values. */
+function serializeFields(
+	source: object,
+	names: string[],
+): Record<string, unknown> {
+	const target = source as unknown as Record<string, unknown>;
 	const data: Record<string, unknown> = {};
 
-	for (const name of componentFieldNames(component)) {
+	for (const name of names) {
 		const value = target[name];
 		if (value === null || value === undefined) continue;
 		if (typeof value === "function") continue;
 		data[name] = cloneFieldValue(value);
 	}
 
-	return { type: component.constructor.name, data };
+	return data;
 }
 
 /** Rebuilds the objects from a snapshot, replacing whatever is in the scene. */
@@ -99,6 +121,7 @@ export function deserializeScene(
 	scene: Scene,
 	data: AnySerializedScene,
 	types: ComponentTypes,
+	objectTypes: GameObjectTypes,
 ): void {
 	// Replace, do not append. Loading twice must not double the objects.
 	scene.clear();
@@ -107,19 +130,25 @@ export function deserializeScene(
 	const objects =
 		data.version === 1 ? data.objects.map(migrateObjectV1) : data.objects;
 	for (const serialized of objects) {
-		scene.add(createObject(serialized, types));
+		const object = createObject(serialized, types, objectTypes);
+		scene.attach(object);
+		restoreActiveState(object, serialized);
 	}
 }
 
-/** Lifts a v1 flat transform onto the v2 `transform` shape. */
+/** Lifts a v1 flat transform onto the v2 shape. */
 function migrateObjectV1(object: SerializedObjectV1): SerializedObject {
 	return {
+		type: "GameObject",
 		name: object.name,
+		active: true,
+		visible: true,
 		transform: {
 			position: { x: object.x, y: object.y, z: 0 },
 			rotation: { x: 0, y: 0, z: object.rotation },
 			scale: { x: object.scaleX, y: object.scaleY, z: 1 },
 		},
+		objectData: {},
 		components: object.components,
 		children: object.children.map(migrateObjectV1),
 	};
@@ -128,8 +157,12 @@ function migrateObjectV1(object: SerializedObjectV1): SerializedObject {
 function createObject(
 	serialized: SerializedObject,
 	types: ComponentTypes,
+	objectTypes: GameObjectTypes,
 ): GameObject {
-	const object = new GameObject(serialized.name);
+	const GameObjectClass = objectTypes[serialized.type] ?? GameObject;
+	const object = new GameObjectClass(serialized.name);
+	object.isVisible = serialized.visible;
+
 	const { position, rotation, scale } = object.transform;
 	position.x = serialized.transform.position.x;
 	position.y = serialized.transform.position.y;
@@ -141,37 +174,53 @@ function createObject(
 	scale.y = serialized.transform.scale.y;
 	scale.z = serialized.transform.scale.z;
 
+	writeFields(object, serialized.objectData);
+
 	for (const saved of serialized.components) {
 		const ComponentClass = types[saved.type];
 		if (!ComponentClass) continue;
-		writeComponent(object.addComponent(ComponentClass), saved.data);
+		writeFields(object.addComponent(ComponentClass), saved.data);
 	}
 
 	for (const child of serialized.children) {
-		createObject(child, types).setParent(object, false);
+		createObject(child, types, objectTypes).setParent(object, false);
 	}
 
 	return object;
 }
 
-/**
- * Writes saved data onto a fresh component. Object values (points, colors) are
- * mutated in place so the component keeps its typed instance.
- */
-function writeComponent(
-	component: Component,
-	data: Record<string, unknown>,
+/** Turns each object back on or off to match the snapshot. */
+function restoreActiveState(
+	object: GameObject,
+	serialized: SerializedObject,
 ): void {
-	const target = component as unknown as Record<string, unknown>;
+	if (serialized.active) {
+		object.enable();
+	} else {
+		object.destroy();
+	}
+
+	const children = object.getChildren();
+	for (let i = 0; i < children.length; i++) {
+		restoreActiveState(children[i], serialized.children[i]);
+	}
+}
+
+/**
+ * Writes saved data onto a fresh object or component. Object values (points,
+ * colors) are mutated in place so the target keeps its typed instance.
+ */
+function writeFields(target: object, data: Record<string, unknown>): void {
+	const record = target as Record<string, unknown>;
 
 	for (const [name, value] of Object.entries(data)) {
-		const current = target[name];
+		const current = record[name];
 		if (isRecord(current) && isRecord(value)) {
 			for (const key of Object.keys(current)) {
 				if (key in value) current[key] = cloneFieldValue(value[key]);
 			}
 			continue;
 		}
-		target[name] = cloneFieldValue(value);
+		record[name] = cloneFieldValue(value);
 	}
 }

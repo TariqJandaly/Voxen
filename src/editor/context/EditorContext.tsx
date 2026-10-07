@@ -14,6 +14,7 @@ import {
 } from "#/core/serialization/SceneSerializer";
 import { type Project, saveProjectScene } from "#/projects/projectStore";
 import { COMPONENT_TYPES } from "../components/componentRegistry";
+import { OBJECT_TYPES } from "../components/objectRegistry";
 
 /**
  * The state the editor shares. `hierarchyVersion` is just a counter we bump so
@@ -57,7 +58,9 @@ export function EditorProvider({
 	useEffect(() => {
 		if (loadedProjectRef.current === project.id) return;
 		loadedProjectRef.current = project.id;
-		if (project.scene) deserializeScene(scene, project.scene, COMPONENT_TYPES);
+		if (project.scene) {
+			deserializeScene(scene, project.scene, COMPONENT_TYPES, OBJECT_TYPES);
+		}
 	}, [scene, project.id, project.scene]);
 
 	// Autosave the scene, and flush once more on the way out.

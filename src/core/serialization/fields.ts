@@ -14,6 +14,19 @@ export const INTERNAL_FIELDS = new Set([
 	"constructor",
 ]);
 
+/** Extra fields hidden when reflecting a GameObject's own (non-component) fields. */
+const OBJECT_INTERNAL_FIELDS = new Set([
+	"id",
+	"name",
+	"parent",
+	"children",
+	"transform",
+	"components",
+	"isVisible",
+	"viewportWidth",
+	"viewportHeight",
+]);
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
@@ -36,6 +49,16 @@ export function componentFieldNames(component: object): string[] {
 
 	return [...names].filter(
 		(name) => !INTERNAL_FIELDS.has(name) && !name.startsWith("_"),
+	);
+}
+
+/**
+ * The public field names on a GameObject itself, like a camera's zoom. Uses the
+ * same reflection as components but also hides the object-managed fields.
+ */
+export function objectFieldNames(object: object): string[] {
+	return componentFieldNames(object).filter(
+		(name) => !OBJECT_INTERNAL_FIELDS.has(name),
 	);
 }
 

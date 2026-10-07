@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import type { Pane as TweakpanePane } from "tweakpane";
+import type {
+	FolderApi as TweakpaneFolder,
+	Pane as TweakpanePane,
+} from "tweakpane";
 import type { Component } from "#/core/Component";
 import {
 	cloneFieldValue,
 	isRecord,
 	reflectFields,
+	reflectObjectFields,
 	viewFromValue,
 } from "../componentFields";
 import { useEditor } from "../context/EditorContext";
@@ -233,34 +237,15 @@ export function InspectorPanel() {
 				);
 			}
 
-			for (const component of selectedObject.getComponents()) {
-				const target = component as unknown as Record<string, unknown>;
-				const folder = pane.addFolder({
-					title: formatLabel(component.constructor.name),
-				});
-
-				// Right-click the component title for its actions. Scoped to the
-				// title so right-clicking a field (for example to paste) is not
-				// hijacked.
-				const titleElement =
-					folder.element.querySelector<HTMLElement>(".tp-fldv_t") ??
-					folder.element;
-				titleElement.addEventListener("contextmenu", (event) => {
-					event.preventDefault();
-					event.stopPropagation();
-					setContextMenu(
-						contextMenuState(event.clientX, event.clientY, [
-							{ label: "Reset", onSelect: () => resetComponent(component) },
-							{
-								label: "Remove",
-								onSelect: () => removeComponent(component),
-								danger: true,
-							},
-						]),
-					);
-				});
-
-				for (const name of reflectFields(component)) {
+			// Renders the fields of an object or component into a folder. Used for
+			// both the object's own fields (a camera's zoom) and each component.
+			const addReflectedFields = (
+				folder: TweakpaneFolder,
+				owner: object,
+				target: Record<string, unknown>,
+				fields: string[],
+			) => {
+				for (const name of fields) {
 					const value = target[name];
 					const view = viewFromValue(value);
 					if (!view) continue;
@@ -304,7 +289,7 @@ export function InspectorPanel() {
 							control,
 							() => ({ ...color }),
 							() => {
-								resetColorField(component, name, color);
+								resetColorField(owner, name, color);
 								syncColor();
 							},
 						);
@@ -343,6 +328,49 @@ export function InspectorPanel() {
 						() => resetValue(target, name),
 					);
 				}
+			};
+
+			// The object's own fields, such as a camera's zoom.
+			const objectFields = reflectObjectFields(selectedObject);
+			if (objectFields.length > 0) {
+				addReflectedFields(
+					pane.addFolder({
+						title: formatLabel(selectedObject.constructor.name),
+					}),
+					selectedObject,
+					selectedObject as unknown as Record<string, unknown>,
+					objectFields,
+				);
+			}
+
+			for (const component of selectedObject.getComponents()) {
+				const target = component as unknown as Record<string, unknown>;
+				const folder = pane.addFolder({
+					title: formatLabel(component.constructor.name),
+				});
+
+				// Right-click the component title for its actions. Scoped to the
+				// title so right-clicking a field (for example to paste) is not
+				// hijacked.
+				const titleElement =
+					folder.element.querySelector<HTMLElement>(".tp-fldv_t") ??
+					folder.element;
+				titleElement.addEventListener("contextmenu", (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					setContextMenu(
+						contextMenuState(event.clientX, event.clientY, [
+							{ label: "Reset", onSelect: () => resetComponent(component) },
+							{
+								label: "Remove",
+								onSelect: () => removeComponent(component),
+								danger: true,
+							},
+						]),
+					);
+				});
+
+				addReflectedFields(folder, component, target, reflectFields(component));
 			}
 
 			// The engine can move objects between frames; re-read values so the

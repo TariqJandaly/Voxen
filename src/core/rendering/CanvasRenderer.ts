@@ -69,4 +69,8 @@ export class CanvasRenderer implements Renderer {
 	public drawText(text: string, x: number, y: number): void {
 		this.ctx.fillText(text, x, y);
 	}
+
+	public measureText(text: string): number {
+		return this.ctx.measureText(text).width;
+	}
 }

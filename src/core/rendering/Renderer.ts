@@ -29,4 +29,5 @@ export interface Renderer {
 
 	setFont(font: string): void;
 	drawText(text: string, x: number, y: number): void;
+	measureText(text: string): number;
 }

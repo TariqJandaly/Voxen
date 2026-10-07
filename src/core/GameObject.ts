@@ -1,6 +1,7 @@
 import type { Component } from "./Component";
 import { Transform } from "./components/Transform";
 import { IDENTITY_MATRIX, invertMatrix, multiplyMatrix } from "./math/Matrix2D";
+import type { Renderer } from "./rendering/Renderer";
 import type { Scene } from "./Scene";
 
 /**
@@ -26,6 +27,9 @@ export class GameObject {
 
 	// Pooling state
 	public isActive = false;
+
+	/** Whether the object draws. Hidden objects still run their update. */
+	public isVisible = true;
 
 	private _scene!: Scene;
 	private components: Component[] = [];
@@ -142,6 +146,45 @@ export class GameObject {
 			const component = this.components[i];
 			if (!component.isActive) continue;
 			component.update(deltaTime);
+		}
+	}
+
+	/** Engine internal: draws every active component. Called only for visible objects. */
+	public render(renderer: Renderer): void {
+		for (let i = 0; i < this.components.length; i++) {
+			const component = this.components[i];
+			if (!component.isActive) continue;
+			component.render(renderer);
+		}
+	}
+
+	/** Whether this object and every one of its ancestors is active. */
+	public isActiveInHierarchy(): boolean {
+		let current: GameObject | null = this;
+		while (current) {
+			if (!current.isActive) return false;
+			current = current.parent;
+		}
+		return true;
+	}
+
+	/** Whether this object and every one of its ancestors is visible. */
+	public isVisibleInHierarchy(): boolean {
+		let current: GameObject | null = this;
+		while (current) {
+			if (!current.isVisible) return false;
+			current = current.parent;
+		}
+		return true;
+	}
+
+	/** Enables or disables the object in place, without detaching it from its parent. */
+	public setActive(active: boolean): void {
+		if (active === this.isActive) return;
+		if (active) {
+			this.enable();
+		} else {
+			this.destroy();
 		}
 	}
 

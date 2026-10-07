@@ -1,5 +1,6 @@
 import type { GameObject } from "./GameObject";
 import { InputManager } from "./inputs/InputManager";
+import { Camera } from "./objects/Camera";
 import type { Renderer } from "./rendering/Renderer";
 
 /**
@@ -8,6 +9,10 @@ import type { Renderer } from "./rendering/Renderer";
  */
 export class Scene {
 	public renderer!: Renderer;
+
+	/** Canvas size in CSS pixels, kept in sync with the renderer. */
+	public viewportWidth = 0;
+	public viewportHeight = 0;
 
 	/** Shown as the scene label in the editor. */
 	public name = "Main";
@@ -74,15 +79,26 @@ export class Scene {
 
 	/** Adds an existing object (and its children) to the scene and turns it on. */
 	public add(object: GameObject): void {
+		this.attach(object);
+		this.enableSubtree(object);
+	}
+
+	/**
+	 * Adds an object and its children to the scene without enabling them. Used
+	 * when loading a scene, where each object's saved state is restored after.
+	 */
+	public attach(object: GameObject): void {
 		object.scene = this;
 		this.registerSubtree(object);
-		this.enableSubtree(object);
 		this.onHierarchyChanged();
 	}
 
 	/** Adds an object and its descendants to `allObjects`. */
 	private registerSubtree(object: GameObject): void {
 		if (!this.allObjects.includes(object)) this.allObjects.push(object);
+		if (object instanceof Camera) {
+			object.setViewport(this.viewportWidth, this.viewportHeight);
+		}
 		const children = object.getChildren();
 		for (let i = 0; i < children.length; i++) {
 			children[i].scene = this;
@@ -115,13 +131,30 @@ export class Scene {
 		}
 	}
 
-	/** Removes every active object from the scene. */
-	public clear(): void {
-		const roots = this.allObjects.filter(
-			(object) =>
-				object.isActive && (!object.parent || !object.parent.isActive),
+	/**
+	 * Takes the object and its children out of the scene for good. Unlike
+	 * `destroy`, nothing is kept for pooling, so it disappears from the editor.
+	 */
+	public remove(object: GameObject): void {
+		object.parent?.removeChild(object);
+		this.unregisterSubtree(object);
+		this.onHierarchyChanged();
+	}
+
+	private unregisterSubtree(object: GameObject): void {
+		this.allObjects = this.allObjects.filter(
+			(candidate) => candidate !== object,
 		);
-		for (let i = 0; i < roots.length; i++) this.destroy(roots[i]);
+		const children = object.getChildren();
+		for (let i = 0; i < children.length; i++) {
+			this.unregisterSubtree(children[i]);
+		}
+	}
+
+	/** Removes every object from the scene. */
+	public clear(): void {
+		const roots = this.allObjects.filter((object) => !object.parent);
+		for (let i = 0; i < roots.length; i++) this.remove(roots[i]);
 	}
 
 	/** Starts the requestAnimationFrame loop. Calling it twice does nothing. */
@@ -142,11 +175,23 @@ export class Scene {
 	 * cleared after a frame has already been drawn (that shows up as a flash).
 	 */
 	public resize(width: number, height: number, pixelRatio: number): void {
+		this.viewportWidth = width;
+		this.viewportHeight = height;
+		this.updateCameraViewports();
 		if (this.isRunning && this.renderer) {
 			this.pendingResize = { width, height, pixelRatio };
 			return;
 		}
 		this.applyResize(width, height, pixelRatio);
+	}
+
+	private updateCameraViewports(): void {
+		for (let i = 0; i < this.allObjects.length; i++) {
+			const object = this.allObjects[i];
+			if (object instanceof Camera) {
+				object.setViewport(this.viewportWidth, this.viewportHeight);
+			}
+		}
 	}
 
 	private applyResize(width: number, height: number, pixelRatio: number): void {
@@ -170,7 +215,7 @@ export class Scene {
 
 		for (let i = 0; i < this.allObjects.length; i++) {
 			const object = this.allObjects[i];
-			if (object.isActive) {
+			if (object.isActiveInHierarchy()) {
 				object.update(deltaTime);
 			}
 		}
@@ -178,8 +223,54 @@ export class Scene {
 		// Clear per-frame input edges after every component has read them.
 		this.input.endFrame();
 
+		this.renderFrame();
 		this.drawDebugOverlay();
 		requestAnimationFrame((time) => this.tick(time));
+	}
+
+	/** The camera the scene renders through, or null when there is none. */
+	public getActiveCamera(): Camera | null {
+		for (let i = 0; i < this.allObjects.length; i++) {
+			const object = this.allObjects[i];
+			if (object instanceof Camera && object.isActiveInHierarchy()) {
+				return object;
+			}
+		}
+		return null;
+	}
+
+	/** Draws every visible object through the active camera. */
+	private renderFrame(): void {
+		const camera = this.getActiveCamera();
+		if (!camera) {
+			this.renderNoCamera();
+			return;
+		}
+
+		this.renderer.save();
+		this.renderer.applyTransform(camera.getViewMatrix());
+		for (let i = 0; i < this.allObjects.length; i++) {
+			const object = this.allObjects[i];
+			if (object.isActiveInHierarchy() && object.isVisibleInHierarchy()) {
+				object.render(this.renderer);
+			}
+		}
+		this.renderer.restore();
+	}
+
+	/** Black screen with a hint, shown when the scene has no active camera. */
+	private renderNoCamera(): void {
+		this.renderer.setFillColor("#000000");
+		this.renderer.fillRect(0, 0, this.viewportWidth, this.viewportHeight);
+		this.renderer.setFillColor("#ffffff");
+		this.renderer.setFont("16px monospace");
+		const text = "No camera active";
+		const textWidth = this.renderer.measureText(text);
+		this.renderer.drawText(
+			text,
+			(this.viewportWidth - textWidth) / 2,
+			this.viewportHeight / 2,
+		);
 	}
 
 	/** Temporary numbers on the canvas. Drawn last so objects cannot cover them. */

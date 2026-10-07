@@ -1,7 +1,7 @@
-import { type DragEvent, type MouseEvent, useState } from "react";
+import { type DragEvent, useState } from "react";
 import type { Component } from "#/core/Component";
-import { GameObject } from "#/core/GameObject";
-import { copyFields } from "../componentFields";
+import type { GameObject } from "#/core/GameObject";
+import { copyFields, copyObjectFields } from "../componentFields";
 import { useEditor } from "../context/EditorContext";
 import {
 	ContextMenu,
@@ -9,11 +9,12 @@ import {
 	type ContextMenuState,
 	contextMenuState,
 } from "./ContextMenu";
+import { type CreatableObject, OBJECT_REGISTRY } from "./objectRegistry";
 
 /**
  * The scene as a tree. Click to select, double-click to rename, drag a row onto
- * another to parent it, and right-click for actions. The + button adds a root
- * object.
+ * another to parent it, and right-click for actions. Each row carries an enable
+ * checkbox and a visibility (eye) toggle; the + button creates a new object.
  */
 export function HierarchyPanel() {
 	const { scene, selectedObject, setSelectedObject, hierarchyVersion } =
@@ -35,17 +36,21 @@ export function HierarchyPanel() {
 	};
 
 	const deleteObject = (object: GameObject) => {
-		if (selectedObject === object) setSelectedObject(null);
-		scene.destroy(object);
+		if (selectedObject && object.isAncestorOf(selectedObject)) {
+			setSelectedObject(null);
+		}
+		scene.remove(object);
 	};
 
-	const createEmpty = (parent: GameObject | null) => {
-		const object = new GameObject(`Entity_${scene.allObjects.length}`);
-		// An object only ticks and draws once enabled, so wire and enable it
-		// before it appears in the list.
-		object.scene = scene;
+	const createObject = (kind: CreatableObject, parent: GameObject | null) => {
+		const name =
+			kind.label === "Empty Object"
+				? `Entity_${scene.allObjects.length}`
+				: kind.label;
+		const object = kind.create(name);
 		if (parent) object.setParent(parent, false);
-		scene.allObjects.push(object);
+		// `attach` wires the object into the scene; `enable` starts it.
+		scene.attach(object);
 		object.enable();
 		if (parent) {
 			setCollapsed((previous) => {
@@ -59,9 +64,13 @@ export function HierarchyPanel() {
 	};
 
 	const duplicateObject = (source: GameObject) => {
-		const copy = new GameObject(`${source.name} copy`);
+		const ObjectClass = source.constructor as unknown as new (
+			name?: string,
+		) => GameObject;
+		const copy = new ObjectClass(`${source.name} copy`);
+		copyObjectFields(source, copy);
 		copyFields(source.transform, copy.transform);
-		copy.scene = scene;
+		copy.isVisible = source.isVisible;
 		if (source.parent) copy.setParent(source.parent, false);
 
 		for (const component of source.getComponents()) {
@@ -70,7 +79,7 @@ export function HierarchyPanel() {
 			copyFields(component, copy.addComponent(ComponentClass));
 		}
 
-		scene.allObjects.push(copy);
+		scene.attach(copy);
 		copy.enable();
 		scene.onHierarchyChanged();
 		setSelectedObject(copy);
@@ -118,24 +127,25 @@ export function HierarchyPanel() {
 		setDropTargetId(target.id);
 	};
 
-	const handleDelete = (event: MouseEvent, object: GameObject) => {
-		event.stopPropagation();
-		deleteObject(object);
-	};
+	// Each entry creates one of the registered object kinds under `parent`.
+	const creationItems = (parent: GameObject | null): ContextMenuItem[] =>
+		OBJECT_REGISTRY.map((kind) => ({
+			label: kind.label,
+			onSelect: () => createObject(kind, parent),
+		}));
 
-	// Build the visible rows: active roots and their active descendants.
-	const active = scene.allObjects.filter((object) => object.isActive);
-	const activeSet = new Set(active);
+	// Every live object is listed, active or not, so disabled rows can be re-enabled.
+	const live = new Set(scene.allObjects);
 	const rows: { object: GameObject; depth: number }[] = [];
 	const visit = (object: GameObject, depth: number) => {
 		rows.push({ object, depth });
 		if (collapsed.has(object.id)) return;
 		for (const child of object.getChildren()) {
-			if (activeSet.has(child)) visit(child, depth + 1);
+			if (live.has(child)) visit(child, depth + 1);
 		}
 	};
-	for (const object of active) {
-		if (!object.parent || !activeSet.has(object.parent)) visit(object, 0);
+	for (const object of scene.allObjects) {
+		if (!object.parent) visit(object, 0);
 	}
 
 	return (
@@ -150,7 +160,15 @@ export function HierarchyPanel() {
 				<span>Hierarchy</span>
 				<button
 					type="button"
-					onClick={() => createEmpty(null)}
+					onClick={(event) =>
+						setContextMenu(
+							contextMenuState(
+								event.clientX,
+								event.clientY,
+								creationItems(null),
+							),
+						)
+					}
 					aria-label="Create object"
 					className="cursor-pointer border-0 bg-transparent px-1 text-base leading-3 text-content hover:text-white"
 				>
@@ -201,7 +219,17 @@ export function HierarchyPanel() {
 								setSelectedObject(object);
 								const items: ContextMenuItem[] = [
 									{ label: "Rename", onSelect: () => setEditingId(object.id) },
-									{ label: "Add Child", onSelect: () => createEmpty(object) },
+									{
+										label: "Add Child",
+										onSelect: () =>
+											setContextMenu(
+												contextMenuState(
+													event.clientX,
+													event.clientY,
+													creationItems(object),
+												),
+											),
+									},
 								];
 								if (object.parent) {
 									items.push({
@@ -264,6 +292,17 @@ export function HierarchyPanel() {
 								<span className="h-4 w-4 shrink-0" aria-hidden="true" />
 							)}
 
+							<input
+								type="checkbox"
+								checked={object.isActive}
+								onChange={(event) => {
+									object.setActive(event.target.checked);
+									scene.onHierarchyChanged();
+								}}
+								aria-label={`${object.isActive ? "Disable" : "Enable"} ${object.name}`}
+								className="size-3 shrink-0 cursor-pointer accent-focus"
+							/>
+
 							{editingId === object.id ? (
 								<input
 									ref={(element) => element?.focus()}
@@ -282,7 +321,9 @@ export function HierarchyPanel() {
 									type="button"
 									onClick={() => setSelectedObject(object)}
 									onDoubleClick={() => setEditingId(object.id)}
-									className="min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent p-0 text-left text-xs"
+									className={`min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent p-0 text-left text-xs ${
+										object.isActive ? "" : "text-muted"
+									}`}
 								>
 									{object.name}
 								</button>
@@ -291,15 +332,23 @@ export function HierarchyPanel() {
 							{editingId !== object.id && (
 								<button
 									type="button"
-									onClick={(event) => handleDelete(event, object)}
-									aria-label={`Delete ${object.name}`}
-									className={`shrink-0 cursor-pointer border-0 bg-transparent px-1 text-danger transition-opacity motion-reduce:transition-none ${
-										selected
-											? "opacity-100"
-											: "opacity-0 group-hover:opacity-100"
+									onClick={() => {
+										object.isVisible = !object.isVisible;
+										scene.onHierarchyChanged();
+									}}
+									aria-label={
+										object.isVisible
+											? `Hide ${object.name}`
+											: `Show ${object.name}`
+									}
+									aria-pressed={!object.isVisible}
+									className={`shrink-0 cursor-pointer border-0 bg-transparent px-1 ${
+										object.isVisible
+											? "text-content"
+											: "text-muted hover:text-content"
 									}`}
 								>
-									x
+									{object.isVisible ? <EyeIcon /> : <EyeOffIcon />}
 								</button>
 							)}
 						</div>
@@ -311,5 +360,41 @@ export function HierarchyPanel() {
 				<ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
 			)}
 		</div>
+	);
+}
+
+function EyeIcon() {
+	return (
+		<svg
+			viewBox="0 0 16 16"
+			aria-hidden="true"
+			className="h-3.5 w-3.5"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.4"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+		>
+			<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
+			<circle cx="8" cy="8" r="2" />
+		</svg>
+	);
+}
+
+function EyeOffIcon() {
+	return (
+		<svg
+			viewBox="0 0 16 16"
+			aria-hidden="true"
+			className="h-3.5 w-3.5"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.4"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+		>
+			<path d="M6.2 3.8A6.7 6.7 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a12 12 0 0 1-2.3 2.7M4 4.6A12 12 0 0 0 1.5 8S4 12.5 8 12.5c1 0 1.9-.3 2.7-.7" />
+			<path d="M2.5 2.5l11 11" />
+		</svg>
 	);
 }

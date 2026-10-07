@@ -1,4 +1,5 @@
 import { Component } from "../Component";
+import type { Renderer } from "../rendering/Renderer";
 
 /**
  * Draws an image at the object's world transform. Until the image finishes
@@ -24,8 +25,7 @@ export class SpriteRenderer extends Component {
 		this.image = image;
 	}
 
-	public update(): void {
-		const renderer = this.scene.renderer;
+	public render(renderer: Renderer): void {
 		const matrix = this.gameObject.transform.getWorldMatrix();
 
 		renderer.save();
