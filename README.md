@@ -62,7 +62,7 @@ Editor side:
 - Undo/redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) over every edit: gizmo drags, hierarchy actions, and inspector changes. History is a git-like branching tree, so going back and editing again keeps the old future as a sibling branch instead of discarding it. The tree is saved to IndexedDB with the scene, so it survives a refresh, and a History tab next to the Inspector lists states newest-first with an icon per action; click any node to jump to that state. Nothing is recorded while the game is playing.
 - An inspector panel built with Tweakpane that edits the selected object's own fields (such as a camera's zoom), its transform, and each component's fields. It auto-detects the view from the value (number, string, boolean, point, or color as a preview swatch, a native color picker, and four R, G, B, A inputs), formats the field names, and has a search box at the bottom to add a component by pressing Enter or clicking it. Right-click a component title to reset or remove it, the Transform title to reset the transform, or any value to copy or reset it. The editor suppresses the browser's own context menu.
 - A `DataTypes` test component, attached to the player, that holds one field of every type the inspector can render.
-- A files panel, currently a placeholder for the project's assets.
+- A Files panel that is a real asset browser: create folders and navigate them with a breadcrumb, recolour folders, rename anything inline, and import images by button or drag-and-drop (validated as images; no size cap). Assets are stored per project in IndexedDB (metadata split from bytes, with a content hash and a generated thumbnail) and referenced from sprites by id, not URL. Drag assets or folders between folders, drag a tile onto the scene to place a sprite sized to the image, or onto an object to assign it; sprites with no asset draw a placeholder. Deleting a folder moves its contents up rather than losing them.
 - One `Scene` owned by the editor and shared with every panel through React context; panels re-render when the engine changes its object list.
 - A viewport component that renders the game at a fixed 1920x1080 (16:9) internal resolution, scaled to fit a black dock so the camera view is the same at any window size, boots the loop, and keeps input scoped to the canvas.
 
@@ -183,12 +183,16 @@ scene.input.setBindings({
 });
 scene.input.attach(canvas);
 
+// Images are assets referenced by id; the scene resolves an id to a URL.
+scene.assetResolver = async (assetId) =>
+  assetId === "player" ? "/assets/player.png" : undefined;
+
 // Describe how to build the player.
 scene.registerPrefab("Player", () => {
   const player = new GameObject("Player");
 
   const sprite = player.addComponent(SpriteRenderer);
-  sprite.imageUrl = "/assets/player.png";
+  sprite.assetId = "player";
 
   player.addComponent(PlayerController);
 

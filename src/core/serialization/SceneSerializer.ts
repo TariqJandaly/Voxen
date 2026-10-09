@@ -218,6 +218,8 @@ function writeFields(target: object, data: Record<string, unknown>): void {
 	const record = target as Record<string, unknown>;
 
 	for (const [name, value] of Object.entries(data)) {
+		// Ignore fields the target no longer has (for example a renamed field).
+		if (!(name in record)) continue;
 		const current = record[name];
 		if (isRecord(current) && isRecord(value)) {
 			for (const key of Object.keys(current)) {

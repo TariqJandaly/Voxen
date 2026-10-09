@@ -3,26 +3,43 @@ import type { WorldBounds } from "../math/WorldBounds";
 import type { Renderer } from "../rendering/Renderer";
 
 /**
- * Draws an image at the object's world transform. Until the image finishes
- * loading it fills the same space with a placeholder rectangle, so an entity is
- * never invisible.
+ * Draws an image at the object's world transform. The image is a project asset,
+ * referenced by id; the scene resolves it to a URL. Until it loads, it fills the
+ * same space with a placeholder rectangle, so an entity is never invisible.
  */
 export class SpriteRenderer extends Component {
-	public imageUrl = "";
+	/** The id of the project asset to draw. Empty draws the placeholder. */
+	public assetId = "";
 	public width = 100;
 	public height = 100;
 
+	/** Fields the inspector renders as an asset picker. */
+	public static readonly assetFields = ["assetId"];
+
 	private image: HTMLImageElement | null = null;
 	private isLoaded = false;
+	private loadToken = 0;
 
 	public start(): void {
-		if (!this.imageUrl) return;
+		void this.loadImage();
+	}
+
+	/** Resolves `assetId` to an image. Call again after changing `assetId`. */
+	public async loadImage(): Promise<void> {
+		const token = ++this.loadToken;
+		this.isLoaded = false;
+		this.image = null;
+
+		const resolver = this.scene.assetResolver;
+		const url =
+			this.assetId && resolver ? await resolver(this.assetId) : undefined;
+		if (token !== this.loadToken || !url) return;
 
 		const image = new Image();
 		image.onload = () => {
-			this.isLoaded = true;
+			if (token === this.loadToken) this.isLoaded = true;
 		};
-		image.src = this.imageUrl;
+		image.src = url;
 		this.image = image;
 	}
 
@@ -41,7 +58,7 @@ export class SpriteRenderer extends Component {
 				this.height,
 			);
 		} else {
-			// Stand-in while the image is still coming over the network.
+			// Stand-in while the asset is missing or still loading.
 			renderer.setFillColor("hotpink");
 			renderer.fillRect(
 				-this.width / 2,

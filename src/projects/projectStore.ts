@@ -1,6 +1,8 @@
-import { type IDBPDatabase, openDB } from "idb";
 import type { SerializedHistory } from "#/core/serialization/history";
 import type { AnySerializedScene } from "#/core/serialization/SceneSerializer";
+import { deleteAssetsForProject } from "./assetStore";
+import { getDb, PROJECT_STORE } from "./db";
+import { deleteFoldersForProject } from "./folderStore";
 
 /** A saved project with its scene snapshot and undo history. */
 export interface Project {
@@ -12,28 +14,7 @@ export interface Project {
 	history?: SerializedHistory;
 }
 
-const DB_NAME = "voxen";
-const DB_VERSION = 2;
-const STORE_NAME = "projects";
-
-let dbPromise: Promise<IDBPDatabase> | null = null;
-
-function getDb(): Promise<IDBPDatabase> {
-	if (!dbPromise) {
-		dbPromise = openDB(DB_NAME, DB_VERSION, {
-			upgrade(database) {
-				// Drop the store an earlier build used, then make sure ours exists.
-				if (database.objectStoreNames.contains("scenes")) {
-					database.deleteObjectStore("scenes");
-				}
-				if (!database.objectStoreNames.contains(STORE_NAME)) {
-					database.createObjectStore(STORE_NAME, { keyPath: "id" });
-				}
-			},
-		});
-	}
-	return dbPromise;
-}
+const STORE_NAME = PROJECT_STORE;
 
 function newId(): string {
 	return typeof crypto !== "undefined" && crypto.randomUUID
@@ -87,6 +68,9 @@ export async function renameProject(id: string, name: string): Promise<void> {
 export async function deleteProject(id: string): Promise<void> {
 	const db = await getDb();
 	await db.delete(STORE_NAME, id);
+	// Assets and folders belong to their project, so remove them too.
+	await deleteAssetsForProject(id);
+	await deleteFoldersForProject(id);
 }
 
 /** Stores a scene snapshot and its undo history on a project. Ignored when the id is unknown. */

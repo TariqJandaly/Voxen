@@ -25,7 +25,8 @@ The editor does not keep game state in React state. React state drives the edito
 | `src/core/GameObject.ts` | Entity: transform, component list, scene link, active and visible flags. |
 | `src/core/objects/` | GameObject subclasses (for example `Camera`); every file here is auto-detected and offered in the create menu. |
 | `src/core/Scene.ts` | Game loop, prefab registry, object pool, input, active camera, and the editor bridge. |
-| `src/core/components/SpriteRenderer.ts` | Draws an image or a fallback rectangle. |
+| `src/core/components/SpriteRenderer.ts` | Draws an asset image (by id) or a fallback rectangle. |
+| `src/core/assets/` | `AssetRegistry`: maps asset ids to runtime object URLs, owning their lifecycle. |
 | `src/core/components/PlayerController.ts` | Sample script that moves an object from input actions. |
 | `src/core/components/DataTypes.ts` | Test component with one field of every inspector type. |
 | `src/core/components/Transform.ts` | Position, rotation, and scale; every object owns one. |
@@ -52,6 +53,10 @@ The editor does not keep game state in React state. React state drives the edito
 | `src/routes/engine.$id.tsx` | Editor for one project; builds the dock layout. |
 | `src/routes/engine.index.tsx` | Redirects `/engine` to `/projects`. |
 | `src/projects/projectStore.ts` | Project persistence in IndexedDB (idb). |
+| `src/projects/db.ts` | The shared IndexedDB connection and schema (projects, assets, blobs, thumbnails). |
+| `src/projects/assetStore.ts` | Asset metadata + bytes: import (validate, hash, thumbnail), list, rename, move, delete. |
+| `src/projects/folderStore.ts` | The asset browser's folder tree: create, rename, recolour, move, delete. |
+| `src/editor/assetRefs.ts` | The asset drag MIME type and a scan for asset references in the scene. |
 
 ## The frame loop
 
@@ -130,6 +135,17 @@ The format is versioned. Version 1 kept the transform flat on the object; the lo
 
 The editor loads a project's scene when it opens and autosaves it back to IndexedDB every couple of seconds and once more on the way out.
 
+## Assets
+
+Images are project assets, referenced by a stable **id** rather than a URL. This is the same reasoning as Godot's resource UIDs: references survive renames and never leak a browser object URL into the saved scene.
+
+- `src/projects/db.ts` owns one IndexedDB database with separate stores for asset **metadata** (`assets`) and **bytes** (`assetBlobs`, `assetThumbs`). Splitting them means listing assets never loads a blob — the same split as Godot's `.import` file versus the imported cache.
+- `src/projects/assetStore.ts` imports an image: it validates the type, hashes the bytes (SHA-256, to skip re-importing an identical file), decodes it once for its dimensions and a small thumbnail, then stores metadata + blob + thumbnail. There is no size cap. Deleting a project cascades to its assets and folders.
+- `src/projects/folderStore.ts` owns the folder tree (`folders` store). Deleting a folder is non-destructive: its direct subfolders and its assets move up to its parent, so only the folder itself disappears.
+- `Scene.assets` is an `AssetRegistry` mapping ids to runtime object URLs, owning their revocation. `Scene.assetResolver` loads an asset's bytes on demand and returns a URL; the editor supplies it. `SpriteRenderer` holds `assetId`, resolves it in `start()`, and draws a placeholder until it loads.
+- A component declares which of its fields are asset ids with `static assetFields = ["assetId"]`. The inspector renders those as a dropdown of the project's assets, and the Files panel and drag targets use the same convention to find references.
+- The Files panel is a folder browser: a breadcrumb to navigate, create/rename/recolour folders (a per-folder colour, stored on the folder), drag assets and folders between folders, and import by button or drop. Dropping a tile onto the scene creates a sprite sized to the image; dropping it on a hierarchy row attaches or updates that object's `SpriteRenderer`. Deleting a folder moves its contents up rather than deleting them.
+
 ## Component lifecycle
 
 | Hook | When it runs |
@@ -154,8 +170,8 @@ Drawing happens in a dedicated render pass, not in `update()`. The scene finds t
 
 `SpriteRenderer` is the reference for how drawing works:
 
-- It loads the image in `start()` and tracks an `isLoaded` flag.
-- Until the image arrives, it draws a solid fallback rectangle, so an entity is never invisible.
+- It resolves `assetId` to an image in `start()` (via `scene.assetResolver`) and tracks an `isLoaded` flag.
+- Until the image arrives (or if the asset is missing), it draws a solid fallback rectangle, so an entity is never invisible.
 - In `render(renderer)` it draws through the renderer it was handed: save, apply the object's world matrix, draw, restore. Pixels are centered on the object's origin at `-width / 2` and `-height / 2`.
 
 Drawing goes through the `Renderer` interface (`src/core/rendering/Renderer.ts`) rather than a raw canvas context, so a WebGL or WebGPU backend can be added later without touching components. `CanvasRenderer` is the current 2D backend and owns the device-pixel-ratio sizing.
@@ -243,7 +259,7 @@ Adding a prefab:
 ```ts
 scene.registerPrefab("Enemy", () => {
   const enemy = new GameObject("Enemy");
-  enemy.addComponent(SpriteRenderer).imageUrl = "/assets/enemy.png";
+  enemy.addComponent(SpriteRenderer).assetId = "enemy";
   enemy.addComponent(MyComponent);
   return enemy;
 });

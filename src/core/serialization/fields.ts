@@ -11,6 +11,7 @@ export const INTERNAL_FIELDS = new Set([
 	"hasStarted",
 	"image",
 	"isLoaded",
+	"loadToken",
 	"constructor",
 ]);
 

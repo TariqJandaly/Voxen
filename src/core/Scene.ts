@@ -1,3 +1,4 @@
+import { AssetRegistry } from "./assets/AssetRegistry";
 import type { GameObject } from "./GameObject";
 import { InputManager } from "./inputs/InputManager";
 import { Camera } from "./objects/Camera";
@@ -22,6 +23,17 @@ export class Scene {
 
 	/** The editor's scene-view camera. When set in edit mode, the scene renders through it. */
 	public viewCamera: Camera | null = null;
+
+	/** Runtime object URLs for assets, filled by the editor and read by components. */
+	public readonly assets = new AssetRegistry();
+
+	/**
+	 * Loads an asset's bytes and returns a URL for it. The editor provides this;
+	 * components call it when they need an asset (for example a sprite image).
+	 */
+	public assetResolver:
+		| ((assetId: string) => Promise<string | undefined>)
+		| null = null;
 
 	/**
 	 * Editor-only overlay while editing: background runs inside the camera

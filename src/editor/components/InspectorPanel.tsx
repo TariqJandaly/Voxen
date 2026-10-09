@@ -77,7 +77,7 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
  * never runs on the server.
  */
 export function InspectorPanel() {
-	const { selectedObject, commit, commitSoon } = useEditor();
+	const { selectedObject, commit, commitSoon, assets } = useEditor();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [query, setQuery] = useState("");
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -255,6 +255,15 @@ export function InspectorPanel() {
 				});
 			}
 
+			// Asset ids render as a picker of the project's assets.
+			const assetOptions: Record<string, string> = { None: "" };
+			for (const asset of assets) {
+				let label = asset.name;
+				let suffix = 1;
+				while (label in assetOptions) label = `${asset.name} (${++suffix})`;
+				assetOptions[label] = asset.id;
+			}
+
 			// Renders the fields of an object or component into a folder. Used for
 			// both the object's own fields (a camera's zoom) and each component.
 			const addReflectedFields = (
@@ -263,10 +272,36 @@ export function InspectorPanel() {
 				target: Record<string, unknown>,
 				fields: string[],
 			) => {
+				const assetFieldNames = new Set(
+					(owner.constructor as { assetFields?: string[] }).assetFields ?? [],
+				);
 				for (const name of fields) {
 					const value = target[name];
 					const view = viewFromValue(value);
 					if (!view) continue;
+
+					if (assetFieldNames.has(name)) {
+						const binding = folder.addBinding(target, name, {
+							label: formatLabel(name),
+							options: assetOptions,
+						});
+						binding.on("change", () => {
+							if (refreshing) return;
+							const meta = assets.find((asset) => asset.id === target[name]);
+							const sprite = owner as {
+								width?: number;
+								height?: number;
+								loadImage?: () => void;
+							};
+							if (meta && typeof sprite.width === "number") {
+								sprite.width = meta.width;
+								sprite.height = meta.height;
+							}
+							sprite.loadImage?.();
+							commitSoon(`Assign asset to ${selectedObject.name}`, "field");
+						});
+						continue;
+					}
 
 					// A color is edited as separate R, G, B, and A inputs.
 					if (view === "color") {
@@ -424,7 +459,7 @@ export function InspectorPanel() {
 			if (refreshTimer) clearInterval(refreshTimer);
 			pane?.dispose();
 		};
-	}, [selectedObject, revision, commit, commitSoon]);
+	}, [selectedObject, revision, commit, commitSoon, assets]);
 
 	return (
 		<div className="flex h-full flex-col bg-panel text-xs text-content">

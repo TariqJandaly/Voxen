@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
-import type { GameObject } from "#/core/GameObject";
+import { SpriteRenderer } from "#/core/components/SpriteRenderer";
+import { GameObject } from "#/core/GameObject";
 import { Camera } from "#/core/objects/Camera";
 import { CanvasRenderer } from "#/core/rendering/CanvasRenderer";
+import { ASSET_DRAG_MIME } from "../assetRefs";
 import { useEditor } from "../context/EditorContext";
 import {
 	beginGizmoDrag,
@@ -42,6 +44,7 @@ export function GameViewport() {
 	const activeHandleRef = useRef<GizmoHandle | null>(null);
 	// Internal pixels per CSS pixel, so screen-space overlays stay constant on screen.
 	const uiScaleRef = useRef(1);
+	const assetsRef = useRef<ReturnType<typeof useEditor>["assets"]>([]);
 	const {
 		scene,
 		selectedObject,
@@ -49,6 +52,7 @@ export function GameViewport() {
 		gizmoMode,
 		setGizmoMode,
 		commit,
+		assets,
 	} = useEditor();
 
 	// The render hook reads these refs, so selecting an object or changing tools
@@ -59,6 +63,9 @@ export function GameViewport() {
 	useEffect(() => {
 		gizmoModeRef.current = gizmoMode;
 	}, [gizmoMode]);
+	useEffect(() => {
+		assetsRef.current = assets;
+	}, [assets]);
 
 	// Renderer, scene-view camera, overlay hooks, and the loop.
 	useEffect(() => {
@@ -144,7 +151,7 @@ export function GameViewport() {
 
 		const cameraAt = () => cameraRef.current;
 		// Convert a pointer position from CSS pixels to internal pixels.
-		const toInternal = (event: PointerEvent | WheelEvent) => {
+		const toInternal = (event: { clientX: number; clientY: number }) => {
 			const rect = canvas.getBoundingClientRect();
 			return {
 				x: (event.clientX - rect.left) * (GAME_WIDTH / rect.width),
@@ -308,15 +315,56 @@ export function GameViewport() {
 			camera.transform.position.y += before.y - after.y;
 		};
 
+		// Dropping an asset on the scene creates a sprite where it lands.
+		const onDragOver = (event: DragEvent) => {
+			if (scene.mode !== "edit") return;
+			if (event.dataTransfer?.types.includes(ASSET_DRAG_MIME)) {
+				event.preventDefault();
+				event.dataTransfer.dropEffect = "copy";
+			}
+		};
+
+		const onDrop = (event: DragEvent) => {
+			if (scene.mode !== "edit") return;
+			const assetId = event.dataTransfer?.getData(ASSET_DRAG_MIME);
+			if (!assetId) return;
+			event.preventDefault();
+			const camera = cameraAt();
+			if (!camera) return;
+
+			const point = toInternal(event);
+			const world = camera.screenToWorld(point.x, point.y);
+			const meta = assetsRef.current.find((asset) => asset.id === assetId);
+
+			const object = new GameObject(meta?.name ?? "Sprite");
+			const sprite = object.addComponent(SpriteRenderer);
+			sprite.assetId = assetId;
+			if (meta) {
+				sprite.width = meta.width;
+				sprite.height = meta.height;
+			}
+			object.transform.position.x = world.x;
+			object.transform.position.y = world.y;
+
+			scene.attach(object);
+			object.enable();
+			setSelectedObject(object);
+			commit(`Create ${object.name}`, "create");
+		};
+
 		canvas.addEventListener("pointerdown", onPointerDown);
 		canvas.addEventListener("pointermove", onPointerMove);
 		canvas.addEventListener("pointerup", onPointerUp);
 		canvas.addEventListener("wheel", onWheel, { passive: false });
+		canvas.addEventListener("dragover", onDragOver);
+		canvas.addEventListener("drop", onDrop);
 		return () => {
 			canvas.removeEventListener("pointerdown", onPointerDown);
 			canvas.removeEventListener("pointermove", onPointerMove);
 			canvas.removeEventListener("pointerup", onPointerUp);
 			canvas.removeEventListener("wheel", onWheel);
+			canvas.removeEventListener("dragover", onDragOver);
+			canvas.removeEventListener("drop", onDrop);
 		};
 	}, [scene, setSelectedObject, commit]);
 

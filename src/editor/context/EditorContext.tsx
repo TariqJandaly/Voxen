@@ -21,6 +21,25 @@ import {
 	deserializeScene,
 	serializeScene,
 } from "#/core/serialization/SceneSerializer";
+import {
+	AssetImportError,
+	type AssetMeta,
+	deleteAsset as deleteAssetStore,
+	getAssetBlob,
+	importAsset,
+	listAssets,
+	moveAsset as moveAssetStore,
+	renameAsset as renameAssetStore,
+} from "#/projects/assetStore";
+import {
+	createFolder as createFolderStore,
+	deleteFolder as deleteFolderStore,
+	type Folder,
+	listFolders,
+	moveFolder as moveFolderStore,
+	renameFolder as renameFolderStore,
+	setFolderColor as setFolderColorStore,
+} from "#/projects/folderStore";
 import { type Project, saveProjectState } from "#/projects/projectStore";
 import { COMPONENT_TYPES } from "../components/componentRegistry";
 import { OBJECT_TYPES } from "../components/objectRegistry";
@@ -45,6 +64,21 @@ interface EditorState {
 	stop: () => void;
 	gizmoMode: GizmoMode;
 	setGizmoMode: (mode: GizmoMode) => void;
+	assets: AssetMeta[];
+	/** Imports image files into a folder; resolves to an error message, or null. */
+	importAssets: (
+		files: File[],
+		folderId?: string | null,
+	) => Promise<string | null>;
+	renameAsset: (id: string, name: string) => Promise<void>;
+	deleteAsset: (id: string) => Promise<void>;
+	moveAsset: (id: string, folderId: string | null) => Promise<void>;
+	folders: Folder[];
+	createFolder: (name: string, parentId: string | null) => Promise<Folder>;
+	renameFolder: (id: string, name: string) => Promise<void>;
+	setFolderColor: (id: string, color: string) => Promise<void>;
+	deleteFolder: (id: string) => Promise<void>;
+	moveFolder: (id: string, parentId: string | null) => Promise<void>;
 	history: SerializedHistory;
 	historyVersion: number;
 	canUndo: boolean;
@@ -85,6 +119,8 @@ export function EditorProvider({
 	const [historyVersion, setHistoryVersion] = useState(0);
 	const [playState, setPlayState] = useState<PlayState>("edit");
 	const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+	const [assets, setAssets] = useState<AssetMeta[]>([]);
+	const [folders, setFolders] = useState<Folder[]>([]);
 	const historyRef = useRef<SerializedHistory>({
 		rootId: "",
 		currentId: "",
@@ -109,6 +145,39 @@ export function EditorProvider({
 	useEffect(() => {
 		selectedRef.current = selectedObject;
 	}, [selectedObject]);
+
+	// Resolve asset ids to object URLs, loading bytes on demand. Declared before
+	// the scene-load effect so components can resolve as they start.
+	useEffect(() => {
+		scene.assetResolver = async (assetId: string) => {
+			const cached = scene.assets.get(assetId);
+			if (cached) return cached;
+			const blob = await getAssetBlob(assetId);
+			if (!blob) return undefined;
+			const url = URL.createObjectURL(blob);
+			scene.assets.set(assetId, url);
+			return url;
+		};
+		return () => {
+			scene.assetResolver = null;
+			scene.assets.clear();
+		};
+	}, [scene]);
+
+	// Load the project's assets and folders (metadata only, no blobs).
+	useEffect(() => {
+		let active = true;
+		void Promise.all([listAssets(project.id), listFolders(project.id)]).then(
+			([assetList, folderList]) => {
+				if (!active) return;
+				setAssets(assetList);
+				setFolders(folderList);
+			},
+		);
+		return () => {
+			active = false;
+		};
+	}, [project.id]);
 
 	// Build the scene and history tree from the saved project once.
 	useEffect(() => {
@@ -270,6 +339,98 @@ export function EditorProvider({
 		[restore],
 	);
 
+	const refreshAssets = useCallback(async () => {
+		const [assetList, folderList] = await Promise.all([
+			listAssets(project.id),
+			listFolders(project.id),
+		]);
+		setAssets(assetList);
+		setFolders(folderList);
+	}, [project.id]);
+
+	const importAssets = useCallback(
+		async (files: File[], folderId: string | null = null) => {
+			try {
+				for (const file of files) {
+					await importAsset(project.id, file, folderId);
+				}
+				await refreshAssets();
+				return null;
+			} catch (error) {
+				return error instanceof AssetImportError
+					? error.message
+					: "Could not import the file.";
+			}
+		},
+		[project.id, refreshAssets],
+	);
+
+	const renameAsset = useCallback(
+		async (id: string, name: string) => {
+			await renameAssetStore(id, name);
+			await refreshAssets();
+		},
+		[refreshAssets],
+	);
+
+	const deleteAsset = useCallback(
+		async (id: string) => {
+			scene.assets.delete(id);
+			await deleteAssetStore(id);
+			await refreshAssets();
+		},
+		[scene, refreshAssets],
+	);
+
+	const moveAsset = useCallback(
+		async (id: string, folderId: string | null) => {
+			await moveAssetStore(id, folderId);
+			await refreshAssets();
+		},
+		[refreshAssets],
+	);
+
+	const createFolder = useCallback(
+		async (name: string, parentId: string | null) => {
+			const folder = await createFolderStore(project.id, name, parentId);
+			await refreshAssets();
+			return folder;
+		},
+		[project.id, refreshAssets],
+	);
+
+	const renameFolder = useCallback(
+		async (id: string, name: string) => {
+			await renameFolderStore(id, name);
+			await refreshAssets();
+		},
+		[refreshAssets],
+	);
+
+	const setFolderColor = useCallback(
+		async (id: string, color: string) => {
+			await setFolderColorStore(id, color);
+			await refreshAssets();
+		},
+		[refreshAssets],
+	);
+
+	const deleteFolder = useCallback(
+		async (id: string) => {
+			await deleteFolderStore(id);
+			await refreshAssets();
+		},
+		[refreshAssets],
+	);
+
+	const moveFolder = useCallback(
+		async (id: string, parentId: string | null) => {
+			await moveFolderStore(id, parentId);
+			await refreshAssets();
+		},
+		[refreshAssets],
+	);
+
 	const play = () => {
 		if (scene.mode === "play") return;
 		cancelPending();
@@ -348,6 +509,17 @@ export function EditorProvider({
 				stop,
 				gizmoMode,
 				setGizmoMode,
+				assets,
+				importAssets,
+				renameAsset,
+				deleteAsset,
+				moveAsset,
+				folders,
+				createFolder,
+				renameFolder,
+				setFolderColor,
+				deleteFolder,
+				moveFolder,
 				history,
 				historyVersion,
 				canUndo: Boolean(currentNode?.parentId),

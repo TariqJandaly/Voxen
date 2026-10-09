@@ -1,6 +1,8 @@
 import { type DragEvent, useState } from "react";
 import type { Component } from "#/core/Component";
+import { SpriteRenderer } from "#/core/components/SpriteRenderer";
 import type { GameObject } from "#/core/GameObject";
+import { ASSET_DRAG_MIME } from "../assetRefs";
 import { copyFields, copyObjectFields } from "../componentFields";
 import { useEditor } from "../context/EditorContext";
 import {
@@ -17,8 +19,14 @@ import { type CreatableObject, OBJECT_REGISTRY } from "./objectRegistry";
  * checkbox and a visibility (eye) toggle; the + button creates a new object.
  */
 export function HierarchyPanel() {
-	const { scene, selectedObject, setSelectedObject, hierarchyVersion, commit } =
-		useEditor();
+	const {
+		scene,
+		selectedObject,
+		setSelectedObject,
+		hierarchyVersion,
+		commit,
+		assets,
+	} = useEditor();
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -90,6 +98,22 @@ export function HierarchyPanel() {
 		scene.onHierarchyChanged();
 		setSelectedObject(copy);
 		commit(`Duplicate ${source.name}`, "duplicate");
+	};
+
+	/** Drops an asset onto an object: attach or update its SpriteRenderer. */
+	const assignAsset = (object: GameObject, assetId: string) => {
+		let sprite = object.getComponent(SpriteRenderer);
+		if (!sprite) sprite = object.addComponent(SpriteRenderer);
+		sprite.assetId = assetId;
+		const meta = assets.find((asset) => asset.id === assetId);
+		if (meta) {
+			sprite.width = meta.width;
+			sprite.height = meta.height;
+		}
+		void sprite.loadImage();
+		scene.onHierarchyChanged();
+		setSelectedObject(object);
+		commit(`Assign asset to ${object.name}`, "field");
 	};
 
 	const toggleCollapsed = (id: string) => {
@@ -198,6 +222,7 @@ export function HierarchyPanel() {
 				}}
 				onDrop={(event) => {
 					event.preventDefault();
+					if (event.dataTransfer.getData(ASSET_DRAG_MIME)) return;
 					handleDrop(null);
 				}}
 				className="flex-1 overflow-y-auto p-1"
@@ -222,9 +247,11 @@ export function HierarchyPanel() {
 							}}
 							onDragOver={(event) => handleDragOver(event, object)}
 							onDrop={(event) => {
+								const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME);
 								event.preventDefault();
 								event.stopPropagation();
-								handleDrop(object);
+								if (assetId) assignAsset(object, assetId);
+								else handleDrop(object);
 							}}
 							onDragEnd={clearDrag}
 							onContextMenu={(event) => {
