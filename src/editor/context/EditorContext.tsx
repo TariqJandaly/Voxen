@@ -1,6 +1,7 @@
 import {
 	createContext,
 	type ReactNode,
+	useCallback,
 	useContext,
 	useEffect,
 	useRef,
@@ -9,11 +10,18 @@ import {
 import type { GameObject } from "#/core/GameObject";
 import { Scene } from "#/core/Scene";
 import {
+	type HistoryActionKind,
+	makeHistoryNode,
+	normalizeHistory,
+	pruneHistory,
+	type SerializedHistory,
+} from "#/core/serialization/history";
+import {
 	type AnySerializedScene,
 	deserializeScene,
 	serializeScene,
 } from "#/core/serialization/SceneSerializer";
-import { type Project, saveProjectScene } from "#/projects/projectStore";
+import { type Project, saveProjectState } from "#/projects/projectStore";
 import { COMPONENT_TYPES } from "../components/componentRegistry";
 import { OBJECT_TYPES } from "../components/objectRegistry";
 import type { GizmoMode } from "../gizmo";
@@ -22,8 +30,8 @@ import type { GizmoMode } from "../gizmo";
 export type PlayState = "edit" | "playing" | "paused";
 
 /**
- * The state the editor shares. `hierarchyVersion` is just a counter we bump so
- * React re-renders when the engine changes its object list behind our back.
+ * The state the editor shares. `hierarchyVersion` and `historyVersion` are
+ * counters we bump so React re-renders when the engine changes behind our back.
  */
 interface EditorState {
 	scene: Scene;
@@ -37,14 +45,27 @@ interface EditorState {
 	stop: () => void;
 	gizmoMode: GizmoMode;
 	setGizmoMode: (mode: GizmoMode) => void;
+	history: SerializedHistory;
+	historyVersion: number;
+	canUndo: boolean;
+	canRedo: boolean;
+	commit: (label: string, kind: HistoryActionKind) => void;
+	/** Commits after a short pause, coalescing rapid edits into one entry. */
+	commitSoon: (label: string, kind: HistoryActionKind) => void;
+	undo: () => void;
+	redo: () => void;
+	jumpTo: (nodeId: string) => void;
 }
 
 const EditorContext = createContext<EditorState | null>(null);
 
+const COMMIT_DEBOUNCE_MS = 400;
+
 /**
- * Creates the editor's `Scene` for a project, loads its saved objects, and
- * autosaves back to IndexedDB. The change callback is set during render, before
- * child effects run, so the first spawn already shows up in the hierarchy.
+ * Creates the editor's `Scene` for a project, loads its saved objects and undo
+ * tree, and autosaves both back to IndexedDB. The change callback is set during
+ * render, before child effects run, so the first spawn already shows up in the
+ * hierarchy.
  */
 export function EditorProvider({
 	children,
@@ -61,8 +82,22 @@ export function EditorProvider({
 	});
 	const [selectedObject, setSelectedObject] = useState<GameObject | null>(null);
 	const [hierarchyVersion, setHierarchyVersion] = useState(0);
+	const [historyVersion, setHistoryVersion] = useState(0);
 	const [playState, setPlayState] = useState<PlayState>("edit");
 	const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+	const historyRef = useRef<SerializedHistory>({
+		rootId: "",
+		currentId: "",
+		nodes: {},
+	});
+	const selectedRef = useRef<GameObject | null>(null);
+	const pendingCommitRef = useRef<{
+		label: string;
+		kind: HistoryActionKind;
+	} | null>(null);
+	const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// True when there is something new to persist, so the autosave can skip idle ticks.
+	const dirtyRef = useRef(true);
 	// The document as it was when play started, restored on stop.
 	const playSnapshotRef = useRef<AnySerializedScene | null>(null);
 	// Guard so StrictMode's double effect does not load the scene twice.
@@ -71,21 +106,115 @@ export function EditorProvider({
 	scene.onHierarchyChanged = () =>
 		setHierarchyVersion((version) => version + 1);
 
-	// Build the scene from the saved project once.
+	useEffect(() => {
+		selectedRef.current = selectedObject;
+	}, [selectedObject]);
+
+	// Build the scene and history tree from the saved project once.
 	useEffect(() => {
 		if (loadedProjectRef.current === project.id) return;
 		loadedProjectRef.current = project.id;
-		if (project.scene) {
-			deserializeScene(scene, project.scene, COMPONENT_TYPES, OBJECT_TYPES);
-		}
-	}, [scene, project.id, project.scene]);
 
-	// Autosave the scene, and flush once more on the way out. Play-mode changes
-	// are not saved: the pre-play snapshot is what should persist.
+		const restored = normalizeHistory(project.history);
+		if (restored?.nodes[restored.currentId]) {
+			historyRef.current = restored;
+			const node = restored.nodes[restored.currentId];
+			deserializeScene(scene, node.scene, COMPONENT_TYPES, OBJECT_TYPES);
+			setSelectedObject(
+				node.selectedId
+					? (scene.allObjects.find((o) => o.id === node.selectedId) ?? null)
+					: null,
+			);
+		} else {
+			if (project.scene) {
+				deserializeScene(scene, project.scene, COMPONENT_TYPES, OBJECT_TYPES);
+			}
+			const root = makeHistoryNode(
+				"Initial",
+				"initial",
+				serializeScene(scene),
+				null,
+				null,
+			);
+			historyRef.current = {
+				rootId: root.id,
+				currentId: root.id,
+				nodes: { [root.id]: root },
+			};
+		}
+		setHistoryVersion((version) => version + 1);
+	}, [scene, project.id, project.scene, project.history]);
+
+	const cancelPending = useCallback(() => {
+		if (pendingTimerRef.current) {
+			clearTimeout(pendingTimerRef.current);
+			pendingTimerRef.current = null;
+		}
+		pendingCommitRef.current = null;
+	}, []);
+
+	/** Adds a child of the current node. Nothing is ever discarded. */
+	const commit = useCallback(
+		(label: string, kind: HistoryActionKind) => {
+			if (scene.mode !== "edit") return;
+			const history = historyRef.current;
+			const parentId = history.currentId;
+			const node = makeHistoryNode(
+				label,
+				kind,
+				serializeScene(scene),
+				parentId,
+				selectedRef.current?.id ?? null,
+			);
+			history.nodes[node.id] = node;
+			const parent = history.nodes[parentId];
+			if (parent) {
+				parent.children.push(node.id);
+				parent.preferredChildId = node.id;
+			}
+			historyRef.current = pruneHistory({ ...history, currentId: node.id });
+			dirtyRef.current = true;
+			setHistoryVersion((version) => version + 1);
+		},
+		[scene],
+	);
+
+	const commitSoon = useCallback(
+		(label: string, kind: HistoryActionKind) => {
+			if (scene.mode !== "edit") return;
+			pendingCommitRef.current = { label, kind };
+			if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
+			pendingTimerRef.current = setTimeout(() => {
+				pendingTimerRef.current = null;
+				pendingCommitRef.current = null;
+				commit(label, kind);
+			}, COMMIT_DEBOUNCE_MS);
+		},
+		[scene, commit],
+	);
+
+	/** Runs a queued debounced commit now, so saving never mutates a node. */
+	const flushPending = useCallback(() => {
+		const pending = pendingCommitRef.current;
+		if (!pending) return;
+		cancelPending();
+		commit(pending.label, pending.kind);
+	}, [commit, cancelPending]);
+
+	// Autosave the scene and history, and flush once more on the way out. History
+	// nodes are immutable: a pending edit is committed first, never written into
+	// the current node. Play mode is not saved.
 	useEffect(() => {
 		const save = () => {
 			if (scene.mode !== "edit") return;
-			void saveProjectScene(project.id, serializeScene(scene));
+			flushPending();
+			if (!dirtyRef.current) return;
+			void saveProjectState(
+				project.id,
+				serializeScene(scene),
+				historyRef.current,
+			);
+			dirtyRef.current = false;
 		};
 
 		const interval = setInterval(save, 2000);
@@ -95,10 +224,55 @@ export function EditorProvider({
 			window.removeEventListener("beforeunload", save);
 			save();
 		};
-	}, [scene, project.id]);
+	}, [scene, project.id, flushPending]);
+
+	/** Rebuilds the scene at a node and restores the selection. */
+	const restore = useCallback(
+		(nodeId: string) => {
+			cancelPending();
+			const history = historyRef.current;
+			const node = history.nodes[nodeId];
+			if (!node) return;
+			deserializeScene(scene, node.scene, COMPONENT_TYPES, OBJECT_TYPES);
+			const parent = node.parentId ? history.nodes[node.parentId] : null;
+			if (parent) parent.preferredChildId = nodeId;
+			historyRef.current = { ...history, currentId: nodeId };
+			setSelectedObject(
+				node.selectedId
+					? (scene.allObjects.find((o) => o.id === node.selectedId) ?? null)
+					: null,
+			);
+			dirtyRef.current = true;
+			setHistoryVersion((version) => version + 1);
+		},
+		[scene, cancelPending],
+	);
+
+	const undo = useCallback(() => {
+		const { nodes, currentId } = historyRef.current;
+		const parentId = nodes[currentId]?.parentId;
+		if (parentId) restore(parentId);
+	}, [restore]);
+
+	const redo = useCallback(() => {
+		const { nodes, currentId } = historyRef.current;
+		const node = nodes[currentId];
+		if (!node) return;
+		const childId =
+			node.preferredChildId ?? node.children[node.children.length - 1];
+		if (childId && nodes[childId]) restore(childId);
+	}, [restore]);
+
+	const jumpTo = useCallback(
+		(nodeId: string) => {
+			if (nodeId !== historyRef.current.currentId) restore(nodeId);
+		},
+		[restore],
+	);
 
 	const play = () => {
 		if (scene.mode === "play") return;
+		cancelPending();
 		playSnapshotRef.current = serializeScene(scene);
 		scene.mode = "play";
 		scene.paused = false;
@@ -118,6 +292,7 @@ export function EditorProvider({
 	};
 
 	const stop = () => {
+		cancelPending();
 		const snapshot = playSnapshotRef.current;
 		if (snapshot) {
 			deserializeScene(scene, snapshot, COMPONENT_TYPES, OBJECT_TYPES);
@@ -128,6 +303,36 @@ export function EditorProvider({
 		setSelectedObject(null);
 		setPlayState("edit");
 	};
+
+	// Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo.
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			const target = event.target as HTMLElement | null;
+			if (
+				target &&
+				(target.tagName === "INPUT" ||
+					target.tagName === "TEXTAREA" ||
+					target.isContentEditable)
+			) {
+				return;
+			}
+			if (!(event.ctrlKey || event.metaKey)) return;
+			const key = event.key.toLowerCase();
+			if (key === "z") {
+				event.preventDefault();
+				if (event.shiftKey) redo();
+				else undo();
+			} else if (key === "y") {
+				event.preventDefault();
+				redo();
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [undo, redo]);
+
+	const history = historyRef.current;
+	const currentNode = history.nodes[history.currentId];
 
 	return (
 		<EditorContext.Provider
@@ -143,6 +348,15 @@ export function EditorProvider({
 				stop,
 				gizmoMode,
 				setGizmoMode,
+				history,
+				historyVersion,
+				canUndo: Boolean(currentNode?.parentId),
+				canRedo: (currentNode?.children.length ?? 0) > 0,
+				commit,
+				commitSoon,
+				undo,
+				redo,
+				jumpTo,
 			}}
 		>
 			{children}

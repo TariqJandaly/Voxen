@@ -77,7 +77,7 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
  * never runs on the server.
  */
 export function InspectorPanel() {
-	const { selectedObject } = useEditor();
+	const { selectedObject, commit, commitSoon } = useEditor();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [query, setQuery] = useState("");
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -102,6 +102,7 @@ export function InspectorPanel() {
 		selectedObject.addComponent(ComponentClass);
 		setQuery("");
 		setRevision((value) => value + 1);
+		commit(`Add ${ComponentClass.name}`, "component");
 	};
 
 	useEffect(() => {
@@ -113,12 +114,17 @@ export function InspectorPanel() {
 		let disposed = false;
 		let pane: TweakpanePane | null = null;
 		let refreshTimer: ReturnType<typeof setInterval> | undefined;
+		// True while we are syncing the pane from the engine, so a refresh that
+		// changes a value (for example when a gizmo moves the object) is not
+		// mistaken for a user edit and committed to history.
+		let refreshing = false;
 		// Custom controls (color swatches) that need re-syncing with the engine.
 		const syncers: Array<() => void> = [];
 
 		const removeComponent = (component: Component) => {
 			selectedObject.removeComponent(component);
 			setRevision((value) => value + 1);
+			commit(`Remove ${component.constructor.name}`, "component");
 		};
 
 		const resetComponent = (component: Component) => {
@@ -127,6 +133,7 @@ export function InspectorPanel() {
 			selectedObject.removeComponent(component);
 			selectedObject.addComponent(ComponentClass);
 			setRevision((value) => value + 1);
+			commit(`Reset ${ComponentClass.name}`, "component");
 		};
 
 		const copyValue = (value: unknown) => {
@@ -149,9 +156,11 @@ export function InspectorPanel() {
 				for (const property of Object.keys(current)) {
 					current[property] = cloneFieldValue(fallback[property]);
 				}
+				commit(`Reset ${formatLabel(key)}`, "field");
 				return;
 			}
 			target[key] = cloneFieldValue(fallback);
+			commit(`Reset ${formatLabel(key)}`, "field");
 		};
 
 		// Reset every channel of a color field to a fresh instance's default.
@@ -168,6 +177,7 @@ export function InspectorPanel() {
 			for (const key of ["r", "g", "b", "a"]) {
 				if (key in fallback) color[key] = cloneFieldValue(fallback[key]);
 			}
+			commit(`Reset ${formatLabel(name)}`, "field");
 		};
 
 		// Right-click a value for copy and reset. Scoped to the value so the
@@ -200,6 +210,7 @@ export function InspectorPanel() {
 			scale.x = 1;
 			scale.y = 1;
 			scale.z = 1;
+			commit("Reset Transform", "field");
 		};
 
 		void import("tweakpane").then(({ Pane }) => {
@@ -235,6 +246,13 @@ export function InspectorPanel() {
 					() => transformTarget[field],
 					() => resetValue(transformTarget, field),
 				);
+				binding.on("change", () => {
+					if (refreshing) return;
+					commitSoon(
+						`${formatLabel(field)} on ${selectedObject.name}`,
+						"field",
+					);
+				});
 			}
 
 			// Renders the fields of an object or component into a folder. Used for
@@ -284,6 +302,10 @@ export function InspectorPanel() {
 							color.g = rgb.g;
 							color.b = rgb.b;
 							syncColor();
+							commitSoon(
+								`${formatLabel(name)} on ${selectedObject.name}`,
+								"field",
+							);
 						});
 						attachValueMenu(
 							control,
@@ -313,6 +335,13 @@ export function InspectorPanel() {
 									syncColor();
 								},
 							);
+							binding.on("change", () => {
+								if (refreshing) return;
+								commitSoon(
+									`${formatLabel(name)} on ${selectedObject.name}`,
+									"field",
+								);
+							});
 						}
 						continue;
 					}
@@ -327,6 +356,13 @@ export function InspectorPanel() {
 						() => target[name],
 						() => resetValue(target, name),
 					);
+					binding.on("change", () => {
+						if (refreshing) return;
+						commitSoon(
+							`${formatLabel(name)} on ${selectedObject.name}`,
+							"field",
+						);
+					});
 				}
 			};
 
@@ -376,8 +412,10 @@ export function InspectorPanel() {
 			// The engine can move objects between frames; re-read values so the
 			// inspector does not drift while the scene is running.
 			refreshTimer = setInterval(() => {
+				refreshing = true;
 				pane?.refresh();
 				for (const sync of syncers) sync();
+				refreshing = false;
 			}, 100);
 		});
 
@@ -386,7 +424,7 @@ export function InspectorPanel() {
 			if (refreshTimer) clearInterval(refreshTimer);
 			pane?.dispose();
 		};
-	}, [selectedObject, revision]);
+	}, [selectedObject, revision, commit, commitSoon]);
 
 	return (
 		<div className="flex h-full flex-col bg-panel text-xs text-content">

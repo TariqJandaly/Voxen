@@ -42,8 +42,14 @@ export function GameViewport() {
 	const activeHandleRef = useRef<GizmoHandle | null>(null);
 	// Internal pixels per CSS pixel, so screen-space overlays stay constant on screen.
 	const uiScaleRef = useRef(1);
-	const { scene, selectedObject, setSelectedObject, gizmoMode, setGizmoMode } =
-		useEditor();
+	const {
+		scene,
+		selectedObject,
+		setSelectedObject,
+		gizmoMode,
+		setGizmoMode,
+		commit,
+	} = useEditor();
 
 	// The render hook reads these refs, so selecting an object or changing tools
 	// does not tear the viewport down and rebuild the loop.
@@ -157,6 +163,7 @@ export function GameViewport() {
 		let moved = false;
 		let drag: GizmoDrag | null = null;
 		let dragObject: GameObject | null = null;
+		let dragMoved = false;
 
 		const onPointerDown = (event: PointerEvent) => {
 			if (scene.mode !== "edit") return;
@@ -189,6 +196,7 @@ export function GameViewport() {
 				if (handle) {
 					drag = beginGizmoDrag(camera, selected, handle, point.x, point.y);
 					dragObject = selected;
+					dragMoved = false;
 					activeHandleRef.current = handle;
 					canvas.setPointerCapture(event.pointerId);
 					return;
@@ -207,6 +215,7 @@ export function GameViewport() {
 
 			if (drag && dragObject) {
 				const point = toInternal(event);
+				dragMoved = true;
 				updateGizmoDrag(
 					camera,
 					dragObject,
@@ -240,11 +249,24 @@ export function GameViewport() {
 
 		const onPointerUp = (event: PointerEvent) => {
 			if (drag && event.button === 0) {
+				const movedObject = dragMoved ? dragObject : null;
+				const mode = gizmoModeRef.current;
 				drag = null;
 				dragObject = null;
+				dragMoved = false;
 				activeHandleRef.current = null;
 				if (canvas.hasPointerCapture(event.pointerId)) {
 					canvas.releasePointerCapture(event.pointerId);
+				}
+				if (movedObject) {
+					const verb =
+						mode === "translate"
+							? "Move"
+							: mode === "rotate"
+								? "Rotate"
+								: "Scale";
+					const kind = mode === "translate" ? "move" : mode;
+					commit(`${verb} ${movedObject.name}`, kind);
 				}
 				return;
 			}
@@ -296,7 +318,7 @@ export function GameViewport() {
 			canvas.removeEventListener("pointerup", onPointerUp);
 			canvas.removeEventListener("wheel", onWheel);
 		};
-	}, [scene, setSelectedObject]);
+	}, [scene, setSelectedObject, commit]);
 
 	// W/E/R switch the active gizmo tool.
 	useEffect(() => {

@@ -1,13 +1,15 @@
 import { type IDBPDatabase, openDB } from "idb";
+import type { SerializedHistory } from "#/core/serialization/history";
 import type { AnySerializedScene } from "#/core/serialization/SceneSerializer";
 
-/** A saved project with its scene snapshot. */
+/** A saved project with its scene snapshot and undo history. */
 export interface Project {
 	id: string;
 	name: string;
 	createdAt: number;
 	updatedAt: number;
 	scene?: AnySerializedScene;
+	history?: SerializedHistory;
 }
 
 const DB_NAME = "voxen";
@@ -87,16 +89,18 @@ export async function deleteProject(id: string): Promise<void> {
 	await db.delete(STORE_NAME, id);
 }
 
-/** Stores a scene snapshot on its project. Ignored when the id is unknown. */
-export async function saveProjectScene(
+/** Stores a scene snapshot and its undo history on a project. Ignored when the id is unknown. */
+export async function saveProjectState(
 	id: string,
 	scene: AnySerializedScene,
+	history: SerializedHistory,
 ): Promise<void> {
 	const db = await getDb();
 	const project = (await db.get(STORE_NAME, id)) as Project | undefined;
 	if (!project) return;
 
 	project.scene = scene;
+	project.history = history;
 	project.updatedAt = Date.now();
 	await db.put(STORE_NAME, project);
 }

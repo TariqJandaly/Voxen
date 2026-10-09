@@ -21,8 +21,19 @@ const GIZMO_TOOLS: ReadonlyArray<{
 ];
 
 export function MenuBar() {
-	const { playState, play, pause, resume, stop, gizmoMode, setGizmoMode } =
-		useEditor();
+	const {
+		playState,
+		play,
+		pause,
+		resume,
+		stop,
+		gizmoMode,
+		setGizmoMode,
+		canUndo,
+		canRedo,
+		undo,
+		redo,
+	} = useEditor();
 	const playing = playState !== "edit";
 
 	return (
@@ -44,6 +55,25 @@ export function MenuBar() {
 			))}
 
 			<div className="ml-auto flex items-center gap-0.5">
+				{!playing && (
+					<div className="mr-2 flex items-center gap-0.5">
+						<TransportButton
+							label="Undo (Ctrl+Z)"
+							onClick={undo}
+							disabled={!canUndo}
+						>
+							<UndoIcon />
+						</TransportButton>
+						<TransportButton
+							label="Redo (Ctrl+Shift+Z)"
+							onClick={redo}
+							disabled={!canRedo}
+						>
+							<RedoIcon />
+						</TransportButton>
+					</div>
+				)}
+
 				{!playing && (
 					<div className="mr-2 flex items-center gap-0.5">
 						{GIZMO_TOOLS.map((tool) => (
@@ -95,18 +125,25 @@ function TransportButton({
 	label,
 	onClick,
 	children,
+	disabled,
 }: {
 	label: string;
 	onClick: () => void;
 	children: ReactNode;
+	disabled?: boolean;
 }) {
 	return (
 		<button
 			type="button"
 			onClick={onClick}
+			disabled={disabled}
 			aria-label={label}
 			title={label}
-			className="flex h-5 w-6 cursor-pointer items-center justify-center border-0 bg-transparent text-content transition-colors hover:bg-panel-alt-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none"
+			className={`flex h-5 w-6 items-center justify-center border-0 bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none ${
+				disabled
+					? "cursor-default text-muted opacity-50"
+					: "cursor-pointer text-content hover:bg-panel-alt-hover"
+			}`}
 		>
 			{children}
 		</button>
@@ -200,6 +237,42 @@ function ScaleIcon() {
 		>
 			<path d="M2.5 9.5L9.5 2.5" />
 			<path d="M9.5 2.5H6.3M9.5 2.5v3.2M2.5 9.5h3.2M2.5 9.5V6.3" />
+		</svg>
+	);
+}
+
+function UndoIcon() {
+	return (
+		<svg
+			viewBox="0 0 12 12"
+			aria-hidden="true"
+			className="h-3 w-3"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.2"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+		>
+			<path d="M3.5 4.5H7.5a2.5 2.5 0 0 1 0 5H5" />
+			<path d="M5.5 2.5L3.5 4.5l2 2" />
+		</svg>
+	);
+}
+
+function RedoIcon() {
+	return (
+		<svg
+			viewBox="0 0 12 12"
+			aria-hidden="true"
+			className="h-3 w-3"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.2"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+		>
+			<path d="M8.5 4.5H4.5a2.5 2.5 0 0 0 0 5H7" />
+			<path d="M6.5 2.5l2 2-2 2" />
 		</svg>
 	);
 }

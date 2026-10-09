@@ -32,12 +32,13 @@ The editor does not keep game state in React state. React state drives the edito
 | `src/core/rendering/` | The `Renderer` interface and the Canvas 2D backend. |
 | `src/core/math/` | `Vector2`, `Vector3`, `Vector4`, `Color`, and `Matrix2D` transform helpers. |
 | `src/core/inputs/InputManager.ts` | Keyboard state tracking and action bindings. |
-| `src/core/serialization/` | Scene snapshots: read and write objects, transforms, and component fields. |
+| `src/core/serialization/` | Scene snapshots: read and write objects, transforms, and component fields; `history.ts` holds the persisted undo tree. |
 | `src/editor/context/EditorContext.tsx` | Owns the shared `Scene` and the current selection. |
 | `src/editor/components/MenuBar.tsx` | Top menu bar and the play/pause/stop transport controls. |
 | `src/editor/components/GameViewport.tsx` | Mounts the canvas, drives the shared scene, and handles scene-view pan, zoom, and picking. |
 | `src/editor/components/HierarchyPanel.tsx` | Names the scene and lists, selects, renames, and deletes objects. |
 | `src/editor/components/InspectorPanel.tsx` | Tweakpane inspector bound to the selected object. |
+| `src/editor/components/HistoryPanel.tsx` | The undo tree as a newest-first, indented, icon-tagged list. |
 | `src/editor/sceneView.ts` | Editor-only scene view: grid, camera icons and view outlines, selection, and object picking. |
 | `src/editor/gizmo.ts` | Editor-only move/rotate/scale gizmo: hit-testing, drawing, and drag math. |
 | `src/editor/components/componentRegistry.ts` | Auto-detects every Component under `core/components/` for the inspector's add search and for loading. |
@@ -121,7 +122,7 @@ A prefab factory can return a parent with children; `spawn` registers and enable
 
 ## Serialization
 
-`serializeScene(scene)` turns the objects into plain data: each object's class name, name, active and visible flags, transform, own fields, component list, and children, with every public field copied out. Colors and vectors come back as plain `{ r, g, b, a }` and `{ x, y }` data, so the result is JSON-friendly.
+`serializeScene(scene)` turns the objects into plain data: each object's class name, id, name, active and visible flags, transform, own fields, component list, and children, with every public field copied out. Colors and vectors come back as plain `{ r, g, b, a }` and `{ x, y }` data, so the result is JSON-friendly. The id is stable across reload and undo, which is how the editor restores the selection.
 
 `deserializeScene(scene, data, types, objectTypes)` rebuilds the tree. It needs a map of component class names to classes (`COMPONENT_TYPES`) and a map of GameObject class names to classes (`OBJECT_TYPES`, which includes `Camera`) to recreate the right types, then writes the saved fields onto fresh instances and restores each object's active and visible state. Object fields are mutated in place, so a restored `Color` stays a `Color`.
 
@@ -193,15 +194,26 @@ The full API is in [input.md](./input.md).
 
 The editor is a React layer that owns exactly one `Scene` and never keeps a parallel copy of game state.
 
-- `EditorProvider` creates the `Scene` for the open project, loads its saved objects, holds the selection and the play state, and autosaves. `useEditor()` exposes the scene, selection, and `play`/`pause`/`resume`/`stop` to the panels.
+- `EditorProvider` creates the `Scene` for the open project, loads its saved objects and undo history, holds the selection and the play state, and autosaves both. `useEditor()` exposes the scene, selection, `play`/`pause`/`resume`/`stop`, and the history (`commit`, `undo`, `redo`, `jumpTo`).
 - `Scene.name` labels the single scene (`Main`), and the hierarchy shows it at the top.
 - `MenuBar` holds the File, Edit, View, Settings, and Help placeholders plus the gizmo tools (move/rotate/scale) and the play/pause/stop transport controls on the right.
 - Panels read `scene.allObjects` for the hierarchy. `scene.onHierarchyChanged` fires when the object list changes, and the provider bumps a version counter so React re-renders. React never polls the scene.
 - `GameViewport` consumes the shared scene from context. It assigns `scene.renderer`, creates the scene-view camera, installs the grid and overlay hooks, wires pan/zoom/pick/gizmo, attaches input to the canvas, and starts the loop. It does not create its own scene.
-- `routes/engine.$id.tsx` (the `/engine/:id` route) loads the project from IndexedDB, names the scene after it, then builds a `flexlayout-react` model from `LayoutModel.ts` and maps each tab's component name (`hierarchy`, `scene`, `files`, `inspector`) to a panel. An unknown id falls back to `/projects`, and `/engine` redirects there too. The `/` route is the landing page and `/projects` lists projects.
+- `routes/engine.$id.tsx` (the `/engine/:id` route) loads the project from IndexedDB, names the scene after it, then builds a `flexlayout-react` model from `LayoutModel.ts` and maps each tab's component name (`hierarchy`, `scene`, `files`, `inspector`, `history`) to a panel. An unknown id falls back to `/projects`, and `/engine` redirects there too. The `/` route is the landing page and `/projects` lists projects.
 - The hierarchy renders the object tree with expand and collapse. Each row carries an enable checkbox (active) and an eye toggle (visible); both live on the object and refresh through `onHierarchyChanged`. The + button and the right-click "Add Child" open a menu built from `OBJECT_REGISTRY`, which auto-detects every GameObject under `core/objects/` (plus a plain Empty Object), so new types appear without registration. Select, rename, and delete objects; drag an object onto another to reparent it (using `setParent` with keep-world). Deleting goes through `scene.remove(object)`, so the object and its children leave the scene. Right-clicking an object also offers rename, add child, unparent, and duplicate (copying its class, own fields, transform, and component values).
 - Right-clicking a component title in the inspector opens a context menu to reset (remove and re-add a fresh instance) or remove it. `GameObject.removeComponent` deactivates the component and drops it from the list. The Transform title has a reset action, and any value (including color channels) can be copied or reset to its default. The editor route suppresses the browser's own context menu so only these menus appear.
 - `InspectorPanel` builds a Tweakpane pane for the selected object. It shows the object's own reflectable fields first (for example a camera's zoom), then the Transform and every component, auto-detects the view from the value (number, string, boolean, point, and color as a preview swatch, a native color picker, and R, G, B, A inputs), and formats the field names. A search input at the bottom filters `componentRegistry.ts` and adds the chosen component on Enter or click. Edits mutate the live engine objects so they show in the canvas immediately. `DataTypes` is a test component that holds one field of each type. Tweakpane is imported lazily so it never loads during SSR.
+
+## Undo, redo, and history
+
+The editor keeps a branching snapshot history, like a commit graph. Each node is the whole scene plus a label, an action kind, and the selected object id; the scene is small enough that a full snapshot per action is simpler and safer than inverse commands, and it covers every kind of edit with one mechanism.
+
+- `commit(label, kind)` adds a child of the current node. Nothing is ever discarded, so going back and editing again creates a sibling branch instead of dropping the old future.
+- `undo` follows `parentId`; `redo` follows `preferredChildId` (the child you were last on, or the newest). `jumpTo(nodeId)` goes straight to any node. Restoring deserializes that node's scene and re-selects the object by its stable id.
+- Commits come from the edit sites: gizmo drags (one node per drag, on pointer-up), hierarchy actions (create, delete, rename, reparent, duplicate, enable, visibility), and inspector edits (debounced through `commitSoon` so a slider drag is one node; the pending commit is cancelled by undo/redo/jump, and resets and add/remove commit immediately). `Ctrl/Cmd+Z` undoes, `Ctrl/Cmd+Shift+Z` or `Ctrl+Y` redoes. While `mode === "play"` nothing commits, so running the game never pollutes history.
+- History nodes are immutable. The autosave flushes any pending debounced commit first and then writes the tree, so a save can never overwrite a node's snapshot with a half-finished edit (which would make undo fail to revert it). A dirty flag skips the IndexedDB write on idle ticks.
+- The inspector's periodic `pane.refresh()` is wrapped in a `refreshing` flag: a value that changes because the engine moved the object (a gizmo drag) is synced into the pane but not committed as a user edit.
+- The tree lives on the project record, so it is autosaved to IndexedDB with the scene and restored on reload. The `HistoryPanel` (a tab next to the Inspector) lists states **newest first**, indented by depth, with the path to the current state highlighted, a branch badge on nodes with several children, and off-path branches dimmed; clicking any node jumps to it. The stack is capped at `HISTORY_LIMIT` nodes, pruning the oldest off-path branches first.
 
 ## Server-side rendering
 

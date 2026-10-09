@@ -21,6 +21,8 @@ export interface SerializedTransform {
 }
 
 export interface SerializedObject {
+	/** Stable id, so selection survives undo/redo and reload. Older data may omit it. */
+	id?: string;
 	/** `constructor.name` of the GameObject, so subclasses like Camera rebuild. */
 	type: string;
 	name: string;
@@ -76,6 +78,7 @@ export function serializeScene(scene: Scene): SerializedScene {
 function serializeObject(object: GameObject): SerializedObject {
 	const { position, rotation, scale } = object.transform;
 	return {
+		id: object.id,
 		type: object.constructor.name,
 		name: object.name,
 		active: object.isActive,
@@ -161,6 +164,7 @@ function createObject(
 ): GameObject {
 	const GameObjectClass = objectTypes[serialized.type] ?? GameObject;
 	const object = new GameObjectClass(serialized.name);
+	if (serialized.id) object.id = serialized.id;
 	object.isVisible = serialized.visible;
 
 	const { position, rotation, scale } = object.transform;

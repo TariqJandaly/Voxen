@@ -17,7 +17,7 @@ import { type CreatableObject, OBJECT_REGISTRY } from "./objectRegistry";
  * checkbox and a visibility (eye) toggle; the + button creates a new object.
  */
 export function HierarchyPanel() {
-	const { scene, selectedObject, setSelectedObject, hierarchyVersion } =
+	const { scene, selectedObject, setSelectedObject, hierarchyVersion, commit } =
 		useEditor();
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -29,7 +29,10 @@ export function HierarchyPanel() {
 		scene.allObjects.find((object) => object.id === id) ?? null;
 
 	const handleRenameSubmit = (object: GameObject, newName: string) => {
-		if (newName.trim()) object.name = newName;
+		if (newName.trim() && newName !== object.name) {
+			object.name = newName;
+			commit(`Rename to ${newName}`, "rename");
+		}
 		setEditingId(null);
 		// The name lives on the object, so nudge React to show the new value.
 		scene.onHierarchyChanged();
@@ -39,7 +42,9 @@ export function HierarchyPanel() {
 		if (selectedObject && object.isAncestorOf(selectedObject)) {
 			setSelectedObject(null);
 		}
+		const name = object.name;
 		scene.remove(object);
+		commit(`Delete ${name}`, "delete");
 	};
 
 	const createObject = (kind: CreatableObject, parent: GameObject | null) => {
@@ -61,6 +66,7 @@ export function HierarchyPanel() {
 		}
 		scene.onHierarchyChanged();
 		setSelectedObject(object);
+		commit(`Create ${object.name}`, "create");
 	};
 
 	const duplicateObject = (source: GameObject) => {
@@ -83,6 +89,7 @@ export function HierarchyPanel() {
 		copy.enable();
 		scene.onHierarchyChanged();
 		setSelectedObject(copy);
+		commit(`Duplicate ${source.name}`, "duplicate");
 	};
 
 	const toggleCollapsed = (id: string) => {
@@ -114,6 +121,12 @@ export function HierarchyPanel() {
 				});
 			}
 			scene.onHierarchyChanged();
+			commit(
+				target
+					? `Parent ${dragged.name} to ${target.name}`
+					: `Unparent ${dragged.name}`,
+				"reparent",
+			);
 		}
 		clearDrag();
 	};
@@ -237,6 +250,7 @@ export function HierarchyPanel() {
 										onSelect: () => {
 											object.setParent(null, true);
 											scene.onHierarchyChanged();
+											commit(`Unparent ${object.name}`, "reparent");
 										},
 									});
 								}
@@ -298,6 +312,10 @@ export function HierarchyPanel() {
 								onChange={(event) => {
 									object.setActive(event.target.checked);
 									scene.onHierarchyChanged();
+									commit(
+										`${event.target.checked ? "Enable" : "Disable"} ${object.name}`,
+										"enable",
+									);
 								}}
 								aria-label={`${object.isActive ? "Disable" : "Enable"} ${object.name}`}
 								className="size-3 shrink-0 cursor-pointer accent-focus"
@@ -335,6 +353,10 @@ export function HierarchyPanel() {
 									onClick={() => {
 										object.isVisible = !object.isVisible;
 										scene.onHierarchyChanged();
+										commit(
+											`${object.isVisible ? "Show" : "Hide"} ${object.name}`,
+											"visibility",
+										);
 									}}
 									aria-label={
 										object.isVisible

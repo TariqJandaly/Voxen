@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { FilesPanel } from "#/editor/components/FilesPanel";
 import { GameViewport } from "#/editor/components/GameViewport";
 import { HierarchyPanel } from "#/editor/components/HierarchyPanel";
+import { HistoryPanel } from "#/editor/components/HistoryPanel";
 import { InspectorPanel } from "#/editor/components/InspectorPanel";
 import { defaultLayout } from "#/editor/components/LayoutModel";
 import { MenuBar } from "#/editor/components/MenuBar";
@@ -70,6 +71,8 @@ function Editor({ project }: { project: Project }) {
 				return <FilesPanel />;
 			case "inspector":
 				return <InspectorPanel />;
+			case "history":
+				return <HistoryPanel />;
 			default:
 				return <div>Unknown Panel</div>;
 		}

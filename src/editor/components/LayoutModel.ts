@@ -73,6 +73,11 @@ export const defaultLayout: IJsonModel = {
 						name: "Inspector",
 						component: "inspector",
 					},
+					{
+						type: "tab",
+						name: "History",
+						component: "history",
+					},
 				],
 			},
 		],
