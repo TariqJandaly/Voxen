@@ -14,6 +14,27 @@ export class Scene {
 	public viewportWidth = 0;
 	public viewportHeight = 0;
 
+	/** `edit` skips component updates and draws the scene-view overlay; `play` runs the game. */
+	public mode: "edit" | "play" = "play";
+
+	/** While playing, freeze updates without leaving play mode. */
+	public paused = false;
+
+	/** The editor's scene-view camera. When set in edit mode, the scene renders through it. */
+	public viewCamera: Camera | null = null;
+
+	/**
+	 * Editor-only overlay while editing: background runs inside the camera
+	 * transform behind objects (a grid); overlay runs after the transform is
+	 * restored, in screen space (selection, gizmos, camera icons).
+	 */
+	public onDrawEditorBackground:
+		| ((renderer: Renderer, camera: Camera) => void)
+		| null = null;
+	public onDrawEditorOverlay:
+		| ((renderer: Renderer, camera: Camera) => void)
+		| null = null;
+
 	/** Shown as the scene label in the editor. */
 	public name = "Main";
 
@@ -192,6 +213,7 @@ export class Scene {
 				object.setViewport(this.viewportWidth, this.viewportHeight);
 			}
 		}
+		this.viewCamera?.setViewport(this.viewportWidth, this.viewportHeight);
 	}
 
 	private applyResize(width: number, height: number, pixelRatio: number): void {
@@ -213,10 +235,12 @@ export class Scene {
 
 		this.renderer.clear();
 
-		for (let i = 0; i < this.allObjects.length; i++) {
-			const object = this.allObjects[i];
-			if (object.isActiveInHierarchy()) {
-				object.update(deltaTime);
+		if (this.mode === "play" && !this.paused) {
+			for (let i = 0; i < this.allObjects.length; i++) {
+				const object = this.allObjects[i];
+				if (object.isActiveInHierarchy()) {
+					object.update(deltaTime);
+				}
 			}
 		}
 
@@ -224,7 +248,6 @@ export class Scene {
 		this.input.endFrame();
 
 		this.renderFrame();
-		this.drawDebugOverlay();
 		requestAnimationFrame((time) => this.tick(time));
 	}
 
@@ -241,7 +264,9 @@ export class Scene {
 
 	/** Draws every visible object through the active camera. */
 	private renderFrame(): void {
-		const camera = this.getActiveCamera();
+		const editing = this.mode === "edit";
+		const camera =
+			editing && this.viewCamera ? this.viewCamera : this.getActiveCamera();
 		if (!camera) {
 			this.renderNoCamera();
 			return;
@@ -249,6 +274,7 @@ export class Scene {
 
 		this.renderer.save();
 		this.renderer.applyTransform(camera.getViewMatrix());
+		if (editing) this.onDrawEditorBackground?.(this.renderer, camera);
 		for (let i = 0; i < this.allObjects.length; i++) {
 			const object = this.allObjects[i];
 			if (object.isActiveInHierarchy() && object.isVisibleInHierarchy()) {
@@ -256,6 +282,7 @@ export class Scene {
 			}
 		}
 		this.renderer.restore();
+		if (editing) this.onDrawEditorOverlay?.(this.renderer, camera);
 	}
 
 	/** Black screen with a hint, shown when the scene has no active camera. */
@@ -270,22 +297,6 @@ export class Scene {
 			text,
 			(this.viewportWidth - textWidth) / 2,
 			this.viewportHeight / 2,
-		);
-	}
-
-	/** Temporary numbers on the canvas. Drawn last so objects cannot cover them. */
-	private drawDebugOverlay(): void {
-		this.renderer.setFillColor("white");
-		this.renderer.setFont("20px monospace");
-		this.renderer.drawText(
-			`Loop Running! Objects: ${this.allObjects.length}`,
-			30,
-			50,
-		);
-		this.renderer.drawText(
-			`Canvas Size: ${this.renderer.width}x${this.renderer.height}`,
-			30,
-			80,
 		);
 	}
 }

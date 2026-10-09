@@ -2,14 +2,7 @@ import { GameObject } from "../GameObject";
 import type { Matrix2D } from "../math/Matrix2D";
 import { invertMatrix } from "../math/Matrix2D";
 import { Vector2 } from "../math/Vector2";
-
-/** An axis-aligned rectangle in world space. */
-export interface WorldBounds {
-	minX: number;
-	minY: number;
-	maxX: number;
-	maxY: number;
-}
+import type { WorldBounds } from "../math/WorldBounds";
 
 /**
  * A camera is a GameObject: it has a transform, can be parented, and lives in

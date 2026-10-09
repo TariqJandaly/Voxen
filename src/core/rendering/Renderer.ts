@@ -19,6 +19,13 @@ export interface Renderer {
 
 	setFillColor(color: string): void;
 	fillRect(x: number, y: number, width: number, height: number): void;
+
+	setStrokeColor(color: string): void;
+	setLineWidth(width: number): void;
+	drawLine(x1: number, y1: number, x2: number, y2: number): void;
+	strokeRect(x: number, y: number, width: number, height: number): void;
+	drawCircle(x: number, y: number, radius: number): void;
+
 	drawImage(
 		image: CanvasImageSource,
 		dx: number,

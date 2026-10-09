@@ -34,10 +34,12 @@ The editor does not keep game state in React state. React state drives the edito
 | `src/core/inputs/InputManager.ts` | Keyboard state tracking and action bindings. |
 | `src/core/serialization/` | Scene snapshots: read and write objects, transforms, and component fields. |
 | `src/editor/context/EditorContext.tsx` | Owns the shared `Scene` and the current selection. |
-| `src/editor/components/MenuBar.tsx` | Top menu bar; placeholder items for now. |
-| `src/editor/components/GameViewport.tsx` | Mounts the canvas and drives the shared scene. |
+| `src/editor/components/MenuBar.tsx` | Top menu bar and the play/pause/stop transport controls. |
+| `src/editor/components/GameViewport.tsx` | Mounts the canvas, drives the shared scene, and handles scene-view pan, zoom, and picking. |
 | `src/editor/components/HierarchyPanel.tsx` | Names the scene and lists, selects, renames, and deletes objects. |
 | `src/editor/components/InspectorPanel.tsx` | Tweakpane inspector bound to the selected object. |
+| `src/editor/sceneView.ts` | Editor-only scene view: grid, camera icons and view outlines, selection, and object picking. |
+| `src/editor/gizmo.ts` | Editor-only move/rotate/scale gizmo: hit-testing, drawing, and drag math. |
 | `src/editor/components/componentRegistry.ts` | Auto-detects every Component under `core/components/` for the inspector's add search and for loading. |
 | `src/editor/components/objectRegistry.ts` | Auto-detects every GameObject under `core/objects/` for the hierarchy's create menu and for loading. |
 | `src/editor/components/ContextMenu.tsx` | Reusable right-click menu. |
@@ -61,21 +63,24 @@ tick(time):
 
   clear the canvas
 
-  for each object in allObjects (by index):
-    if object.isActiveInHierarchy():
-      object.update(deltaTime)      # components read input and move here
+  if mode is play and not paused:
+    for each object in allObjects (by index):
+      if object.isActiveInHierarchy():
+        object.update(deltaTime)    # components read input and move here
 
   input.endFrame()                  # clear one-frame press and release edges
 
   renderFrame():
-    camera = getActiveCamera()
+    camera = (edit and viewCamera) ? viewCamera : getActiveCamera()
     if no camera:
       draw black background + "No camera active"
     else:
       save, apply camera.getViewMatrix()
+      if editing: draw the scene-view grid
       for each object:
         if object.isActiveInHierarchy() and object.isVisibleInHierarchy():
           object.render(renderer)   # components draw here
+      if editing: draw the selection highlight
       restore
 
   drawDebugOverlay()
@@ -156,7 +161,22 @@ Drawing goes through the `Renderer` interface (`src/core/rendering/Renderer.ts`)
 
 `Camera` is a `GameObject` subclass, so it is created, parented, and inspected like any other object. Its world `position` is the centre of the view, `rotation.z` rotates the view, and `zoom` scales it. `getViewMatrix()` builds the world-to-screen matrix, `worldToScreen`/`screenToWorld` convert points, and `getVisibleBounds()` returns the world rectangle the camera can see. The scene keeps every camera's viewport size in sync on resize. If a scene has more than one active camera, the first in `allObjects` wins.
 
-The viewport watches the canvas container with a `ResizeObserver` and reports the CSS size to `scene.resize`, which sizes the backing buffer and applies the device-pixel-ratio scale. A dock splitter changes the container without firing a window resize, so the report is queued and applied at the start of the next frame, avoiding a one-frame flash.
+The game renders at a fixed 1920x1080 (16:9) internal resolution, so the camera always sees the same world area no matter the window size. The viewport watches the canvas container with a `ResizeObserver`, fits the largest 16:9 rectangle inside it, and scales the canvas to that CSS size; the dock around it stays black. The scene view fills its area with its own background colour so the game rectangle reads apart from the black overflow. A dock splitter changes the container without firing a window resize, so the report is queued and applied at the start of the next frame, avoiding a one-frame flash. Screen-space overlays are drawn in internal pixels scaled by `uiScale` (internal pixels per CSS pixel) so gizmos and icons keep a constant on-screen size.
+
+## Scene view and play mode
+
+`Scene.mode` is `"edit"` or `"play"`, and `Scene.paused` freezes a running game. The editor drives both.
+
+- **Edit** skips `update` (gameplay scripts do not run) and renders through `Scene.viewCamera`, the editor's own scene-view camera. It is not a game object, so it never appears in the hierarchy and is never serialized.
+- **Play** runs `update` and renders through the first active game `Camera`, falling back to the black "No camera active" screen when the document has none. **Pause** keeps play mode but stops `update`.
+
+Two optional hooks draw the editor overlay while editing: `Scene.onDrawEditorBackground` runs inside the camera transform, behind objects (the grid); `Scene.onDrawEditorOverlay` runs after the transform is restored, in screen space (camera icons, the selection box, and the gizmo). The drawing lives in `src/editor/sceneView.ts` and `src/editor/gizmo.ts`, so the core stays editor-agnostic.
+
+`GameViewport` drives the scene-view camera: middle-drag pans, the wheel zooms toward the cursor, and a left click picks the object under the pointer. Picking unions each component's `getWorldBounds()` (a small handle for empty objects, an icon-sized box for a camera), which is what `SpriteRenderer` implements for editor hit-testing. A camera in the scene draws as a small icon plus an outline of the world rectangle it sees, so it is always visible and clickable.
+
+With an object selected, a gizmo draws at its origin: move (W), rotate (E), or scale (R). Handles are tested in screen space and stay a constant size at any zoom. Dragging writes straight to `Transform`; move adds the world-space pointer delta, rotate sets `rotation.z` from the pointer angle, and scale multiplies by the pointer-distance ratio. Editing the transform is not yet undoable.
+
+Starting play snapshots the document with `serializeScene`; stopping restores it with `deserializeScene`, so play-mode changes are discarded. Autosave is skipped outside edit mode, so the running game is never persisted.
 
 ## Input
 
@@ -173,11 +193,11 @@ The full API is in [input.md](./input.md).
 
 The editor is a React layer that owns exactly one `Scene` and never keeps a parallel copy of game state.
 
-- `EditorProvider` creates the `Scene` for the open project, loads its saved objects, holds the selection, and autosaves. `useEditor()` exposes the scene and selection to the panels.
+- `EditorProvider` creates the `Scene` for the open project, loads its saved objects, holds the selection and the play state, and autosaves. `useEditor()` exposes the scene, selection, and `play`/`pause`/`resume`/`stop` to the panels.
 - `Scene.name` labels the single scene (`Main`), and the hierarchy shows it at the top.
-- `MenuBar` is a top bar placeholder for the usual File, Edit, View, Settings, and Help menus; it has no actions yet.
+- `MenuBar` holds the File, Edit, View, Settings, and Help placeholders plus the gizmo tools (move/rotate/scale) and the play/pause/stop transport controls on the right.
 - Panels read `scene.allObjects` for the hierarchy. `scene.onHierarchyChanged` fires when the object list changes, and the provider bumps a version counter so React re-renders. React never polls the scene.
-- `GameViewport` consumes the shared scene from context. It assigns `scene.renderer`, attaches input to the canvas, and starts the loop. It does not create its own scene.
+- `GameViewport` consumes the shared scene from context. It assigns `scene.renderer`, creates the scene-view camera, installs the grid and overlay hooks, wires pan/zoom/pick/gizmo, attaches input to the canvas, and starts the loop. It does not create its own scene.
 - `routes/engine.$id.tsx` (the `/engine/:id` route) loads the project from IndexedDB, names the scene after it, then builds a `flexlayout-react` model from `LayoutModel.ts` and maps each tab's component name (`hierarchy`, `scene`, `files`, `inspector`) to a panel. An unknown id falls back to `/projects`, and `/engine` redirects there too. The `/` route is the landing page and `/projects` lists projects.
 - The hierarchy renders the object tree with expand and collapse. Each row carries an enable checkbox (active) and an eye toggle (visible); both live on the object and refresh through `onHierarchyChanged`. The + button and the right-click "Add Child" open a menu built from `OBJECT_REGISTRY`, which auto-detects every GameObject under `core/objects/` (plus a plain Empty Object), so new types appear without registration. Select, rename, and delete objects; drag an object onto another to reparent it (using `setParent` with keep-world). Deleting goes through `scene.remove(object)`, so the object and its children leave the scene. Right-clicking an object also offers rename, add child, unparent, and duplicate (copying its class, own fields, transform, and component values).
 - Right-clicking a component title in the inspector opens a context menu to reset (remove and re-add a fresh instance) or remove it. `GameObject.removeComponent` deactivates the component and drops it from the list. The Transform title has a reset action, and any value (including color channels) can be copied or reset to its default. The editor route suppresses the browser's own context menu so only these menus appear.

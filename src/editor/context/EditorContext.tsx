@@ -9,12 +9,17 @@ import {
 import type { GameObject } from "#/core/GameObject";
 import { Scene } from "#/core/Scene";
 import {
+	type AnySerializedScene,
 	deserializeScene,
 	serializeScene,
 } from "#/core/serialization/SceneSerializer";
 import { type Project, saveProjectScene } from "#/projects/projectStore";
 import { COMPONENT_TYPES } from "../components/componentRegistry";
 import { OBJECT_TYPES } from "../components/objectRegistry";
+import type { GizmoMode } from "../gizmo";
+
+/** Edit is the authoring view; play runs the game; paused freezes it in place. */
+export type PlayState = "edit" | "playing" | "paused";
 
 /**
  * The state the editor shares. `hierarchyVersion` is just a counter we bump so
@@ -25,6 +30,13 @@ interface EditorState {
 	selectedObject: GameObject | null;
 	setSelectedObject: (obj: GameObject | null) => void;
 	hierarchyVersion: number;
+	playState: PlayState;
+	play: () => void;
+	pause: () => void;
+	resume: () => void;
+	stop: () => void;
+	gizmoMode: GizmoMode;
+	setGizmoMode: (mode: GizmoMode) => void;
 }
 
 const EditorContext = createContext<EditorState | null>(null);
@@ -44,10 +56,15 @@ export function EditorProvider({
 	const [scene] = useState(() => {
 		const created = new Scene();
 		created.name = project.name;
+		created.mode = "edit";
 		return created;
 	});
 	const [selectedObject, setSelectedObject] = useState<GameObject | null>(null);
 	const [hierarchyVersion, setHierarchyVersion] = useState(0);
+	const [playState, setPlayState] = useState<PlayState>("edit");
+	const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+	// The document as it was when play started, restored on stop.
+	const playSnapshotRef = useRef<AnySerializedScene | null>(null);
 	// Guard so StrictMode's double effect does not load the scene twice.
 	const loadedProjectRef = useRef<string | null>(null);
 
@@ -63,9 +80,11 @@ export function EditorProvider({
 		}
 	}, [scene, project.id, project.scene]);
 
-	// Autosave the scene, and flush once more on the way out.
+	// Autosave the scene, and flush once more on the way out. Play-mode changes
+	// are not saved: the pre-play snapshot is what should persist.
 	useEffect(() => {
 		const save = () => {
+			if (scene.mode !== "edit") return;
 			void saveProjectScene(project.id, serializeScene(scene));
 		};
 
@@ -78,9 +97,53 @@ export function EditorProvider({
 		};
 	}, [scene, project.id]);
 
+	const play = () => {
+		if (scene.mode === "play") return;
+		playSnapshotRef.current = serializeScene(scene);
+		scene.mode = "play";
+		scene.paused = false;
+		setPlayState("playing");
+	};
+
+	const pause = () => {
+		if (scene.mode !== "play" || scene.paused) return;
+		scene.paused = true;
+		setPlayState("paused");
+	};
+
+	const resume = () => {
+		if (scene.mode !== "play" || !scene.paused) return;
+		scene.paused = false;
+		setPlayState("playing");
+	};
+
+	const stop = () => {
+		const snapshot = playSnapshotRef.current;
+		if (snapshot) {
+			deserializeScene(scene, snapshot, COMPONENT_TYPES, OBJECT_TYPES);
+		}
+		playSnapshotRef.current = null;
+		scene.mode = "edit";
+		scene.paused = false;
+		setSelectedObject(null);
+		setPlayState("edit");
+	};
+
 	return (
 		<EditorContext.Provider
-			value={{ scene, selectedObject, setSelectedObject, hierarchyVersion }}
+			value={{
+				scene,
+				selectedObject,
+				setSelectedObject,
+				hierarchyVersion,
+				playState,
+				play,
+				pause,
+				resume,
+				stop,
+				gizmoMode,
+				setGizmoMode,
+			}}
 		>
 			{children}
 		</EditorContext.Provider>

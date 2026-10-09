@@ -53,14 +53,17 @@ Engine side:
 Editor side:
 
 - A projects page (`/projects`) to create, rename, delete, and open projects. Each project stores its scene, game objects, and component values, saved in IndexedDB via `idb`.
-- A top menu bar (File, Edit, View, Settings, Help), a placeholder with no actions yet.
+- A top menu bar (File, Edit, View, Settings, Help) with move/rotate/scale gizmo tools and play/pause/stop transport controls on the right.
+- Edit and play modes: edit runs nothing and draws the scene through its own scene-view camera with a grid; play runs the game through the scene's camera; stop restores the document as it was before play. Play changes are never autosaved.
+- A scene view with middle-drag pan, cursor-anchored wheel zoom, and click-to-select picking that highlights the selection; gameplay scripts do not run while editing.
+- Move, rotate, and scale gizmos (W/E/R) for the selected object, with constant-size handles, plus a camera icon and a frustum outline showing what each camera sees.
 - A docked layout (`flexlayout-react`): hierarchy and scene across the top, a files explorer beneath them, and the inspector full height on the right.
 - A hierarchy panel that labels the current scene (`Main`) and shows its objects as a tree: expand and collapse children, drag an object onto another to parent it, and rename or create objects. Each row has an enable checkbox and a visibility (eye) toggle. The + button and "Add Child" build their menu from every GameObject under `core/objects/`, so a new type appears on its own. Right-click an object for a context menu (rename, add child, unparent, duplicate, delete).
 - An inspector panel built with Tweakpane that edits the selected object's own fields (such as a camera's zoom), its transform, and each component's fields. It auto-detects the view from the value (number, string, boolean, point, or color as a preview swatch, a native color picker, and four R, G, B, A inputs), formats the field names, and has a search box at the bottom to add a component by pressing Enter or clicking it. Right-click a component title to reset or remove it, the Transform title to reset the transform, or any value to copy or reset it. The editor suppresses the browser's own context menu.
 - A `DataTypes` test component, attached to the player, that holds one field of every type the inspector can render.
 - A files panel, currently a placeholder for the project's assets.
 - One `Scene` owned by the editor and shared with every panel through React context; panels re-render when the engine changes its object list.
-- A viewport component that mounts the canvas, boots the loop, and keeps input scoped to the canvas.
+- A viewport component that renders the game at a fixed 1920x1080 (16:9) internal resolution, scaled to fit a black dock so the camera view is the same at any window size, boots the loop, and keeps input scoped to the canvas.
 
 ## Tech stack
 

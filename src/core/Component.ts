@@ -1,4 +1,5 @@
 import type { GameObject } from "./GameObject";
+import type { WorldBounds } from "./math/WorldBounds";
 import type { Renderer } from "./rendering/Renderer";
 import type { Scene } from "./Scene";
 
@@ -22,6 +23,14 @@ export abstract class Component {
 
 	/** Runs every frame to draw, through the scene renderer. */
 	public render(_renderer: Renderer): void {}
+
+	/**
+	 * The component's world-space bounds, used by the editor for picking and
+	 * highlighting. Components that draw something should override it.
+	 */
+	public getWorldBounds(): WorldBounds | null {
+		return null;
+	}
 
 	/** Runs each time the host object is enabled, including when it comes back from the pool. */
 	public onEnable(): void {}

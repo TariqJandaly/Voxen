@@ -1,4 +1,5 @@
 import { Component } from "../Component";
+import type { WorldBounds } from "../math/WorldBounds";
 import type { Renderer } from "../rendering/Renderer";
 
 /**
@@ -51,5 +52,33 @@ export class SpriteRenderer extends Component {
 		}
 
 		renderer.restore();
+	}
+
+	/** The sprite's four corners mapped to world space, as an axis-aligned box. */
+	public getWorldBounds(): WorldBounds | null {
+		const matrix = this.gameObject.transform.getWorldMatrix();
+		const halfWidth = this.width / 2;
+		const halfHeight = this.height / 2;
+		const corners: Array<[number, number]> = [
+			[-halfWidth, -halfHeight],
+			[halfWidth, -halfHeight],
+			[halfWidth, halfHeight],
+			[-halfWidth, halfHeight],
+		];
+
+		let minX = Number.POSITIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+		for (const [x, y] of corners) {
+			const worldX = matrix[0] * x + matrix[2] * y + matrix[4];
+			const worldY = matrix[1] * x + matrix[3] * y + matrix[5];
+			if (worldX < minX) minX = worldX;
+			if (worldY < minY) minY = worldY;
+			if (worldX > maxX) maxX = worldX;
+			if (worldY > maxY) maxY = worldY;
+		}
+
+		return { minX, minY, maxX, maxY };
 	}
 }

@@ -52,6 +52,31 @@ export class CanvasRenderer implements Renderer {
 		this.ctx.fillRect(x, y, width, height);
 	}
 
+	public setStrokeColor(color: string): void {
+		this.ctx.strokeStyle = color;
+	}
+
+	public setLineWidth(width: number): void {
+		this.ctx.lineWidth = width;
+	}
+
+	public drawLine(x1: number, y1: number, x2: number, y2: number): void {
+		this.ctx.beginPath();
+		this.ctx.moveTo(x1, y1);
+		this.ctx.lineTo(x2, y2);
+		this.ctx.stroke();
+	}
+
+	public strokeRect(x: number, y: number, width: number, height: number): void {
+		this.ctx.strokeRect(x, y, width, height);
+	}
+
+	public drawCircle(x: number, y: number, radius: number): void {
+		this.ctx.beginPath();
+		this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+		this.ctx.stroke();
+	}
+
 	public drawImage(
 		image: CanvasImageSource,
 		dx: number,
